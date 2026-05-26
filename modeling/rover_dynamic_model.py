@@ -81,6 +81,51 @@ class RoverModel:
 
         return np.array([self.x_g, self.y_g, self.psi_g, self.battery_charge_j], dtype=float)
 
+    def _power_at_state(self, state: np.ndarray) -> float:
+        """Instantaneous consumption for an augmented state and current command."""
+
+        pose = state[:3]
+        v = self.v_command_mps
+        omega = self.omega_command_radps
+        global_rates = self.se2_kinematics(pose, self.control)
+
+        # Constant commanded v and omega imply centripetal projected acceleration.
+        x_ddot = -v * omega * np.sin(pose[2])
+        y_ddot = v * omega * np.cos(pose[2])
+
+        breakdown = self.power_breakdown(
+            x_dot=global_rates[0],
+            y_dot=global_rates[1],
+            x_ddot=x_ddot,
+            y_ddot=y_ddot,
+            psi=pose[2],
+            omega=omega,
+            omega_dot=0.0,
+        )
+        return float(breakdown["power_consumption_w"])
+
+    def _dynamics(self, state: np.ndarray) -> np.ndarray:
+        """Augmented dynamics for RK4 integration."""
+
+        pose_dot = self.se2_kinematics(state[:3], self.control)
+        power_consumption_w = self._power_at_state(state)
+        battery_discharge_rate_j_per_s = max(
+            power_consumption_w - self.power_generation_w,
+            0.0,
+        )
+        return np.array([pose_dot[0], pose_dot[1], pose_dot[2], -battery_discharge_rate_j_per_s])
+
+    def _rk4(self, state: np.ndarray, dt: float) -> np.ndarray:
+        """Fourth-order Runge-Kutta integration for the model's augmented state."""
+
+        k1 = self._dynamics(state)
+        k2 = self._dynamics(state + 0.5 * dt * k1)
+        k3 = self._dynamics(state + 0.5 * dt * k2)
+        k4 = self._dynamics(state + dt * k3)
+        return state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+    ##--------------------------------------------------------------------------------------##
+    # Transformations
     def body_longitudinal_velocity(
         self,
         x_dot: ArrayLike,
@@ -131,6 +176,8 @@ class RoverModel:
         omega = control[..., 1]
         return np.stack((v * np.cos(psi), v * np.sin(psi), omega), axis=-1)
 
+    ##--------------------------------------------------------------------------------------##
+    # Dynamics
     def linear_motion_power(
         self,
         x_dot: ArrayLike,
@@ -204,49 +251,6 @@ class RoverModel:
             "power_generation_w": power_generation_w,
             "power_margin_w": power_generation_w - power_consumption_w,
         }
-
-    def _power_at_state(self, state: np.ndarray) -> float:
-        """Instantaneous consumption for an augmented state and current command."""
-
-        pose = state[:3]
-        v = self.v_command_mps
-        omega = self.omega_command_radps
-        global_rates = self.se2_kinematics(pose, self.control)
-
-        # Constant commanded v and omega imply centripetal projected acceleration.
-        x_ddot = -v * omega * np.sin(pose[2])
-        y_ddot = v * omega * np.cos(pose[2])
-
-        breakdown = self.power_breakdown(
-            x_dot=global_rates[0],
-            y_dot=global_rates[1],
-            x_ddot=x_ddot,
-            y_ddot=y_ddot,
-            psi=pose[2],
-            omega=omega,
-            omega_dot=0.0,
-        )
-        return float(breakdown["power_consumption_w"])
-
-    def _dynamics(self, state: np.ndarray) -> np.ndarray:
-        """Augmented dynamics for RK4 integration."""
-
-        pose_dot = self.se2_kinematics(state[:3], self.control)
-        power_consumption_w = self._power_at_state(state)
-        battery_discharge_rate_j_per_s = max(
-            power_consumption_w - self.power_generation_w,
-            0.0,
-        )
-        return np.array([pose_dot[0], pose_dot[1], pose_dot[2], -battery_discharge_rate_j_per_s])
-
-    def _rk4(self, state: np.ndarray, dt: float) -> np.ndarray:
-        """Fourth-order Runge-Kutta integration for the model's augmented state."""
-
-        k1 = self._dynamics(state)
-        k2 = self._dynamics(state + 0.5 * dt * k1)
-        k3 = self._dynamics(state + 0.5 * dt * k2)
-        k4 = self._dynamics(state + dt * k3)
-        return state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
     def update_power_metrics(self) -> None:
         """Refresh current power consumption and battery discharge rate."""
