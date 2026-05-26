@@ -3,14 +3,14 @@
 Set MODE to "straight" or "circle". The rover executes that command until
 the stored battery energy is depleted by net power draw:
 
-    battery_dot = p_available - p_total.
+    battery_dot = power_generation_w - power_consumption_w.
 
 This is a simple open-loop simulation, not a planner. It repeatedly:
 
 1. Converts the commanded projected-frame velocity into SE(2) state rates.
-2. Estimates acceleration from the previous step.
+2. Computes acceleration from the constant-speed circular-motion equations.
 3. Uses RoverModel.power_breakdown(...) to compute instantaneous load.
-4. Drains the battery only when load exceeds RTG + solar input.
+4. Calls RoverModel.step(dt), which integrates pose and battery energy with RK4.
 """
 
 import os
@@ -47,7 +47,7 @@ def plot_simulation(
     states: np.ndarray,
     battery_trace: np.ndarray,
     power_trace: np.ndarray,
-    available_power: float,
+    power_generation_w: float,
     output_path: str,
 ) -> None:
     """Save pose, battery, and power traces from the simulation."""
@@ -79,8 +79,8 @@ def plot_simulation(
     axes[1, 0].set_ylabel("energy [J]")
     axes[1, 0].grid(True, alpha=0.3)
 
-    axes[1, 1].plot(times, power_trace, label="total load", color="tab:red")
-    axes[1, 1].axhline(available_power, label="RTG + solar", color="tab:blue", linestyle="--")
+    axes[1, 1].plot(times, power_trace, label="consumption", color="tab:red")
+    axes[1, 1].axhline(power_generation_w, label="generation", color="tab:blue", linestyle="--")
     axes[1, 1].set_title("Power")
     axes[1, 1].set_xlabel("time [s]")
     axes[1, 1].set_ylabel("power [W]")
@@ -97,37 +97,18 @@ def main() -> None:
     # the selected power inputs are high enough to sustain the rover forever.
     dt = 0.1
     max_time = 2_000.0
+    control = command_for_mode(MODE)
 
-    # Stored battery energy is separate from hybrid generation. The rover can
-    # keep driving while battery_energy_j > 0 even if p_total > p_available.
-    battery_capacity_j = 20_000.0
-    battery_energy_j = battery_capacity_j
-
-    # These parameters are intentionally chosen so p_total is usually above
-    # p_available; otherwise the battery would not run out in this example.
+    # These parameters are intentionally chosen so load is above constant
+    # generation; otherwise the battery would not run out in this example.
     model = RoverModel(
-        mass=84.0,
-        inertia_z=7.111679166666666,
-        gravity=1.62,
-        # Flat no-grade EMRS breadboard-scaled lunar resistance from the NASA
-        # terramechanics estimate: compression + rolling + bulldozing.
-        c0=63.54416662174218,
-        p_base=100.0,
-        p_rtg=45.0,
-        p_solar=20.0,
+        battery_charge_j=20_000.0,
+        power_generation_w=65.0,
+        v_command_mps=control[0],
+        omega_command_radps=control[1],
         phi=np.deg2rad(4.0),
         xi=np.deg2rad(3.0),
     )
-
-    control = command_for_mode(MODE)
-
-    # Projected SE(2) state: [x_G, y_G, psi_G].
-    state = np.array([0.0, 0.0, 0.0])
-
-    # Used for finite-difference acceleration and angular acceleration. The
-    # first step includes the acceleration needed to move from rest to command.
-    previous_velocity = np.array([0.0, 0.0])
-    previous_omega = 0.0
 
     # Store traces for summary statistics at the end.
     times = []
@@ -137,45 +118,21 @@ def main() -> None:
 
     steps = int(max_time / dt)
     for step in range(steps):
-        time = step * dt
+        times.append(model.time_s)
+        states.append(model.pose.copy())
+        battery_trace.append(model.battery_charge_j)
+        power_trace.append(model.power_consumption_w)
 
-        # The dynamic model power equations need x_dot, y_dot, x_ddot, y_ddot,
-        # omega, and omega_dot in the projected frame.
-        derivative = model.se2_kinematics(state, control)
-        velocity = derivative[:2]
-        acceleration = (velocity - previous_velocity) / dt
-        omega = derivative[2]
-        omega_dot = (omega - previous_omega) / dt
-
-        powers = model.power_breakdown(
-            x_dot=velocity[0],
-            y_dot=velocity[1],
-            x_ddot=acceleration[0],
-            y_ddot=acceleration[1],
-            psi=state[2],
-            omega=omega,
-            omega_dot=omega_dot,
-        )
-        total_power = float(powers["p_total"])
-
-        # Positive net_battery_power means the rover needs extra power from the
-        # battery. Negative values mean RTG + solar fully cover the load, so the
-        # battery is not drained in this simple example.
-        net_battery_power = total_power - model.p_available
-
-        times.append(time)
-        states.append(state.copy())
-        battery_trace.append(battery_energy_j)
-        power_trace.append(total_power)
-
-        battery_energy_j -= max(net_battery_power, 0.0) * dt
-        if battery_energy_j <= 0.0:
+        if model.battery_charge_j <= 0.0:
             break
 
-        # Advance the rover pose after logging the current-step state.
-        state = model.euler_step(state, control, dt)
-        previous_velocity = velocity
-        previous_omega = omega
+        model.step(dt)
+        if model.battery_charge_j <= 0.0:
+            times.append(model.time_s)
+            states.append(model.pose.copy())
+            battery_trace.append(model.battery_charge_j)
+            power_trace.append(model.power_consumption_w)
+            break
 
     times = np.array(times)
     states = np.array(states)
@@ -188,14 +145,14 @@ def main() -> None:
     print(f"Run time: {times[-1]:.1f} s")
     print(f"Distance traveled: {distance:.2f} m")
     print(f"Final pose [x, y, psi]: {states[-1]}")
-    print(f"Battery remaining: {max(battery_energy_j, 0.0):.2f} J")
+    print(f"Battery remaining: {model.battery_charge_j:.2f} J")
     print(f"Average total power: {np.mean(power_trace):.2f} W")
     print(f"Peak total power: {np.max(power_trace):.2f} W")
-    print(f"Hybrid input power: {model.p_available:.2f} W")
-    print(f"Initial battery: {battery_capacity_j:.2f} J")
+    print(f"Generation power: {model.power_generation_w:.2f} W")
+    print(f"Initial battery: {model.battery_charge_j if len(battery_trace) == 0 else battery_trace[0]:.2f} J")
     print(f"Final logged battery: {battery_trace[-1]:.2f} J")
 
-    plot_simulation(times, states, battery_trace, power_trace, model.p_available, PLOT_PATH)
+    plot_simulation(times, states, battery_trace, power_trace, model.power_generation_w, PLOT_PATH)
     print(f"Saved plot: {PLOT_PATH}")
 
 

@@ -8,23 +8,23 @@ import numpy as np
 ArrayLike = float | np.ndarray
 
 
-@dataclass(frozen=True)
+@dataclass
 class RoverModel:
     """Reduced EMRS/Hu rover dynamic and power model.
 
-    The model uses the projected SE(2) state ``[x_G, y_G, psi_G]`` and the
-    projected control ``[v_Bpi, omega_Bpi]``. For the simplified AA222 model,
-    terrain resistance is a C0-only constant-force model:
+    The model owns the current rover pose, command, battery charge, and power
+    metrics. Calling ``step(dt)`` advances the committed state with RK4.
+
+    Terrain resistance is simplified to the C0-only form
 
         P_res = C0 |v_B|
 
-    The default C0 is the flat, no-grade EMRS breadboard-scaled lunar value
-    from ``modeling/rolling_resistance/emrs_resistive_forces.json``:
+    where the default C0 is the flat, no-grade EMRS breadboard-scaled lunar
+    terramechanics estimate:
 
         C0 = R_compression + R_rolling + R_bulldozing = 63.5441666 N
 
-    Grade/slope is intentionally kept out of C0 and handled separately by the
-    translational term ``m g sin(phi)`` to avoid double counting.
+    Grade is not included in C0; slope enters through ``m g sin(phi)``.
     """
 
     mass: float = 84.0
@@ -32,16 +32,21 @@ class RoverModel:
     gravity: float = 1.62
     c0: float = 63.54416662174218
     p_base: float = 100.0
-    p_rtg: float = 0.0
-    p_solar: float = 0.0
+    power_generation_w: float = 65.0
+    battery_charge_j: float = 20_000.0
     phi: ArrayLike = 0.0
     xi: ArrayLike = 0.0
+    x_g: float = 0.0
+    y_g: float = 0.0
+    psi_g: float = 0.0
+    v_command_mps: float = 0.45
+    omega_command_radps: float = 0.18
+    time_s: float = 0.0
+    power_consumption_w: float = 0.0
+    battery_discharge_rate_j_per_s: float = 0.0
 
-    @property
-    def p_available(self) -> float:
-        """Hybrid RTG plus solar power availability from Eq. (6)."""
-
-        return self.p_rtg + self.p_solar
+    def __post_init__(self) -> None:
+        self.update_power_metrics()
 
     @staticmethod
     def _as_array(value: ArrayLike) -> np.ndarray:
@@ -58,13 +63,31 @@ class RoverModel:
     def _positive_part(value: ArrayLike) -> np.ndarray:
         return np.maximum(RoverModel._as_array(value), 0.0)
 
+    @property
+    def pose(self) -> np.ndarray:
+        """Current projected SE(2) pose ``[x_G, y_G, psi_G]``."""
+
+        return np.array([self.x_g, self.y_g, self.psi_g], dtype=float)
+
+    @property
+    def control(self) -> np.ndarray:
+        """Current projected command ``[v_Bpi, omega_Bpi]``."""
+
+        return np.array([self.v_command_mps, self.omega_command_radps], dtype=float)
+
+    @property
+    def _state(self) -> np.ndarray:
+        """Current augmented integration state ``[x_G, y_G, psi_G, E]``."""
+
+        return np.array([self.x_g, self.y_g, self.psi_g, self.battery_charge_j], dtype=float)
+
     def body_longitudinal_velocity(
         self,
         x_dot: ArrayLike,
         y_dot: ArrayLike,
         phi: ArrayLike | None = None,
     ) -> np.ndarray:
-        """Body-frame longitudinal velocity from Eq. (1)."""
+        """Body-frame longitudinal velocity from projected global rates."""
 
         phi = self.phi if phi is None else phi
         v_global = np.hypot(self._as_array(x_dot), self._as_array(y_dot))
@@ -77,7 +100,7 @@ class RoverModel:
         psi: ArrayLike,
         phi: ArrayLike | None = None,
     ) -> np.ndarray:
-        """Body-frame longitudinal acceleration from Eq. (2)."""
+        """Body-frame longitudinal acceleration from projected global rates."""
 
         phi = self.phi if phi is None else phi
         x_ddot = self._as_array(x_ddot)
@@ -87,52 +110,19 @@ class RoverModel:
         return projected_accel / self._safe_cos(phi, "phi")
 
     def body_yaw_rate(self, omega: ArrayLike, xi: ArrayLike | None = None) -> np.ndarray:
-        """Body-frame yaw rate from Eq. (3)."""
+        """Body-frame yaw rate from projected yaw rate."""
 
         xi = self.xi if xi is None else xi
         return self._as_array(omega) / self._safe_cos(xi, "xi")
 
     def body_yaw_acceleration(self, omega_dot: ArrayLike, xi: ArrayLike | None = None) -> np.ndarray:
-        """Body-frame yaw acceleration from Eq. (4)."""
+        """Body-frame yaw acceleration from projected yaw acceleration."""
 
         xi = self.xi if xi is None else xi
         return self._as_array(omega_dot) / self._safe_cos(xi, "xi")
 
-    def projected_reference_control(
-        self,
-        x_dot: ArrayLike,
-        y_dot: ArrayLike,
-        omega: ArrayLike,
-    ) -> np.ndarray:
-        """Build the projected NMPC reference input ``[v_ref, omega_ref]``."""
-
-        return np.stack((np.hypot(self._as_array(x_dot), self._as_array(y_dot)), self._as_array(omega)), axis=-1)
-
-    def body_command_from_projected(
-        self,
-        v_projected: ArrayLike,
-        omega_projected: ArrayLike,
-        phi: ArrayLike | None = None,
-        xi: ArrayLike | None = None,
-    ) -> np.ndarray:
-        """Map projected-frame control to body-frame command."""
-
-        phi = self.phi if phi is None else phi
-        xi = self.xi if xi is None else xi
-        return np.stack(
-            (
-                self._as_array(v_projected) / self._safe_cos(phi, "phi"),
-                self._as_array(omega_projected) / self._safe_cos(xi, "xi"),
-            ),
-            axis=-1,
-        )
-
     def se2_kinematics(self, state: ArrayLike, control: ArrayLike) -> np.ndarray:
-        """Continuous projected differential-drive dynamics.
-
-        ``state`` has final dimension ``[x, y, psi]`` and ``control`` has
-        final dimension ``[v_Bpi, omega_Bpi]``.
-        """
+        """Projected SE(2) rates ``[x_dot_G, y_dot_G, psi_dot_G]``."""
 
         state = self._as_array(state)
         control = self._as_array(control)
@@ -140,11 +130,6 @@ class RoverModel:
         v = control[..., 0]
         omega = control[..., 1]
         return np.stack((v * np.cos(psi), v * np.sin(psi), omega), axis=-1)
-
-    def euler_step(self, state: ArrayLike, control: ArrayLike, dt: float) -> np.ndarray:
-        """Forward-Euler step for the projected SE(2) kinematic model."""
-
-        return self._as_array(state) + dt * self.se2_kinematics(state, control)
 
     def linear_motion_power(
         self,
@@ -155,11 +140,7 @@ class RoverModel:
         psi: ArrayLike,
         phi: ArrayLike | None = None,
     ) -> np.ndarray:
-        """Nonnegative translational mechanical power.
-
-        This implements ``[(m a_B + m g sin(phi)) v_B]_+``. Downhill motion or
-        braking is not modeled as regenerative energy.
-        """
+        """Nonnegative translational mechanical power."""
 
         phi = self.phi if phi is None else phi
         v_body = self.body_longitudinal_velocity(x_dot, y_dot, phi)
@@ -173,7 +154,7 @@ class RoverModel:
         omega_dot: ArrayLike,
         xi: ArrayLike | None = None,
     ) -> np.ndarray:
-        """Nonnegative yaw mechanical power ``[I_z alpha omega]_+``."""
+        """Nonnegative yaw mechanical power."""
 
         xi = self.xi if xi is None else xi
         omega_body = self.body_yaw_rate(omega, xi)
@@ -185,23 +166,12 @@ class RoverModel:
         x_dot: ArrayLike,
         y_dot: ArrayLike,
         phi: ArrayLike | None = None,
-        *,
-        signed_velocity: bool = False,
     ) -> np.ndarray:
-        """C0-only terrain resistance power.
-
-        ``C0`` represents compression, rolling/internal, and bulldozing
-        resistance on flat terrain. It excludes grade resistance.
-
-        The default is dissipative for reverse motion too. Set
-        ``signed_velocity=True`` only if the caller explicitly wants signed
-        mechanical power.
-        """
+        """C0-only terrain resistance power."""
 
         phi = self.phi if phi is None else phi
         v_body = self.body_longitudinal_velocity(x_dot, y_dot, phi)
-        multiplier = v_body if signed_velocity else np.abs(v_body)
-        return self.c0 * multiplier
+        return self.c0 * np.abs(v_body)
 
     def power_breakdown(
         self,
@@ -212,92 +182,93 @@ class RoverModel:
         psi: ArrayLike,
         omega: ArrayLike,
         omega_dot: ArrayLike,
-        phi: ArrayLike | None = None,
-        xi: ArrayLike | None = None,
-        p_available: ArrayLike | None = None,
     ) -> dict[str, np.ndarray]:
-        """Compute motion, baseline, total, and available power."""
+        """Compute motion, baseline, consumption, and generation power."""
 
-        p_linear = self.linear_motion_power(x_dot, y_dot, x_ddot, y_ddot, psi, phi)
-        p_rotational = self.rotational_motion_power(omega, omega_dot, xi)
-        p_resistive = self.resistive_power(x_dot, y_dot, phi)
+        p_linear = self.linear_motion_power(x_dot, y_dot, x_ddot, y_ddot, psi)
+        p_rotational = self.rotational_motion_power(omega, omega_dot)
+        p_resistive = self.resistive_power(x_dot, y_dot)
         p_motion = p_linear + p_rotational + p_resistive
-        p_total = p_motion + self.p_base
-        available = self.p_available if p_available is None else p_available
-        p_available_array = np.broadcast_to(self._as_array(available), np.shape(p_total))
-        p_base = np.broadcast_to(self._as_array(self.p_base), np.shape(p_total))
+        power_consumption_w = p_motion + self.p_base
+        power_generation_w = np.broadcast_to(
+            self._as_array(self.power_generation_w),
+            np.shape(power_consumption_w),
+        )
         return {
             "p_linear": p_linear,
             "p_rotational": p_rotational,
             "p_resistive": p_resistive,
             "p_motion": p_motion,
-            "p_base": p_base,
-            "p_total": p_total,
-            "p_available": p_available_array,
-            "margin": p_available_array - p_total,
-            "smooth_motion_norm": np.hypot(p_linear, p_rotational),
+            "p_base": np.broadcast_to(self._as_array(self.p_base), np.shape(power_consumption_w)),
+            "power_consumption_w": power_consumption_w,
+            "power_generation_w": power_generation_w,
+            "power_margin_w": power_generation_w - power_consumption_w,
         }
 
-    def cumulative_energy(self, power: ArrayLike, time: ArrayLike) -> float:
-        """Integrate power over time with the trapezoidal rule."""
+    def _power_at_state(self, state: np.ndarray) -> float:
+        """Instantaneous consumption for an augmented state and current command."""
 
-        trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
-        return float(trapezoid(self._as_array(power), self._as_array(time)))
+        pose = state[:3]
+        v = self.v_command_mps
+        omega = self.omega_command_radps
+        global_rates = self.se2_kinematics(pose, self.control)
 
-    # The functions below are the smooth power-limit penalty from the paper.
-    # They are kept here as commented reference code because the current
-    # battery-runout example only needs raw power and energy accounting.
-    # Re-enable them when using RoverModel inside a trajectory optimizer.
+        # Constant commanded v and omega imply centripetal projected acceleration.
+        x_ddot = -v * omega * np.sin(pose[2])
+        y_ddot = v * omega * np.cos(pose[2])
 
-    # def softplus(self, z: ArrayLike, kappa: float = 10.0) -> np.ndarray:
-    #     """Numerically stable softplus used by Eq. (20)."""
+        breakdown = self.power_breakdown(
+            x_dot=global_rates[0],
+            y_dot=global_rates[1],
+            x_ddot=x_ddot,
+            y_ddot=y_ddot,
+            psi=pose[2],
+            omega=omega,
+            omega_dot=0.0,
+        )
+        return float(breakdown["power_consumption_w"])
 
-    #     z_scaled = kappa * self._as_array(z)
-    #     return np.logaddexp(0.0, z_scaled) / kappa
+    def _dynamics(self, state: np.ndarray) -> np.ndarray:
+        """Augmented dynamics for RK4 integration."""
 
-    # def sigmoid(self, z: ArrayLike) -> np.ndarray:
-    #     """Numerically stable logistic sigmoid."""
+        pose_dot = self.se2_kinematics(state[:3], self.control)
+        power_consumption_w = self._power_at_state(state)
+        battery_discharge_rate_j_per_s = max(
+            power_consumption_w - self.power_generation_w,
+            0.0,
+        )
+        return np.array([pose_dot[0], pose_dot[1], pose_dot[2], -battery_discharge_rate_j_per_s])
 
-    #     z = self._as_array(z)
-    #     return np.where(z >= 0.0, 1.0 / (1.0 + np.exp(-z)), np.exp(z) / (1.0 + np.exp(z)))
+    def _rk4(self, state: np.ndarray, dt: float) -> np.ndarray:
+        """Fourth-order Runge-Kutta integration for the model's augmented state."""
 
-    # def power_limit_penalty(
-    #     self,
-    #     breakdown: dict[str, np.ndarray],
-    #     weight: float = 1.0,
-    #     kappa: float = 10.0,
-    # ) -> np.ndarray:
-    #     """Smooth instantaneous power-limit penalty from Eqs. (18)-(21)."""
+        k1 = self._dynamics(state)
+        k2 = self._dynamics(state + 0.5 * dt * k1)
+        k3 = self._dynamics(state + 0.5 * dt * k2)
+        k4 = self._dynamics(state + dt * k3)
+        return state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
-    #     tau = breakdown["p_available"] - breakdown["p_total"]
-    #     z = breakdown["smooth_motion_norm"] - tau
-    #     sp = self.softplus(z, kappa)
-    #     return weight * sp**2
+    def update_power_metrics(self) -> None:
+        """Refresh current power consumption and battery discharge rate."""
 
-    # def power_limit_penalty_gradient_scale(
-    #     self,
-    #     breakdown: dict[str, np.ndarray],
-    #     weight: float = 1.0,
-    #     kappa: float = 10.0,
-    #     eps: float = 1.0e-12,
-    # ) -> tuple[np.ndarray, np.ndarray]:
-    #     """Return ``dJ/dP_lin`` and ``dJ/dP_rot`` from Eqs. (22)-(24)."""
+        self.power_consumption_w = self._power_at_state(self._state)
+        self.battery_discharge_rate_j_per_s = max(
+            self.power_consumption_w - self.power_generation_w,
+            0.0,
+        )
 
-    #     tau = breakdown["p_available"] - breakdown["p_total"]
-    #     z = breakdown["smooth_motion_norm"] - tau
-    #     d_j_d_z = 2.0 * weight * self.softplus(z, kappa) * self.sigmoid(kappa * z)
-    #     norm = np.maximum(breakdown["smooth_motion_norm"], eps)
-    #     return d_j_d_z * breakdown["p_linear"] / norm, d_j_d_z * breakdown["p_rotational"] / norm
+    def step(self, dt: float) -> None:
+        """Advance pose and battery by one committed RK4 timestep."""
 
-    # This feasibility check belongs with the penalty helpers above. It is not
-    # used by the open-loop battery example, which allows temporary overloads
-    # and drains the battery by the excess power instead.
+        if self.battery_charge_j <= 0.0:
+            self.battery_charge_j = 0.0
+            self.update_power_metrics()
+            return
 
-    # def is_power_feasible(
-    #     self,
-    #     breakdown: dict[str, np.ndarray],
-    #     tolerance: float = 0.0,
-    # ) -> bool:
-    #     """Check the instantaneous constraint ``P_cons <= P_avail``."""
-
-    #     return bool(np.all(breakdown["p_total"] <= breakdown["p_available"] + tolerance))
+        next_state = self._rk4(self._state, dt)
+        self.x_g = float(next_state[0])
+        self.y_g = float(next_state[1])
+        self.psi_g = float(next_state[2])
+        self.battery_charge_j = max(float(next_state[3]), 0.0)
+        self.time_s += dt
+        self.update_power_metrics()
