@@ -34,6 +34,11 @@ class RoverModel:
     p_base: float = 100.0
     power_generation_w: float = 65.0
     battery_charge_j: float = 20_000.0
+    min_battery_charge_j: float = 0.0
+    max_battery_charge_j: float | None = None
+    max_speed_mps: float = 0.45
+    max_power_consumption_w: float = 1_000.0
+    default_dt_s: float = 0.1
     phi: ArrayLike = 0.0
     xi: ArrayLike = 0.0
     x_g: float = 0.0
@@ -46,6 +51,8 @@ class RoverModel:
     battery_discharge_rate_j_per_s: float = 0.0
 
     def __post_init__(self) -> None:
+        if self.max_battery_charge_j is None:
+            self.max_battery_charge_j = self.battery_charge_j
         self.update_power_metrics()
 
     @staticmethod
@@ -178,6 +185,94 @@ class RoverModel:
 
     ##--------------------------------------------------------------------------------------##
     # Dynamics
+    def P(self, x: ArrayLike, u: ArrayLike, dt: float | None = None) -> float:
+        """Stateless power consumption for SCP.
+
+        Parameters
+        ----------
+        x : array-like
+            Augmented optimization state ``[X, Y, E, speed, heading, omega]``.
+            The previous speed, heading, and yaw rate let the model estimate
+            translational acceleration and yaw acceleration over the interval.
+        u : array-like
+            Optimization control ``[speed, heading]``.
+        dt : float, optional
+            Discretization interval. If omitted, ``default_dt_s`` is used.
+        """
+
+        dt = self.default_dt_s if dt is None else float(dt)
+        if dt <= 0.0:
+            raise ValueError("dt must be positive")
+        u = self._as_array(u)
+        x = self._as_array(x)
+        if x.shape[-1] < 6:
+            raise ValueError("SCP state must be [X, Y, E, speed, heading, omega]")
+
+        speed_prev = float(x[3])
+        heading_prev = float(x[4])
+        omega_prev = float(x[5])
+        speed_cmd = float(u[0])
+        heading_cmd = float(u[1])
+
+        accel_cmd = (speed_cmd - speed_prev) / dt
+        omega_cmd = (heading_cmd - heading_prev) / dt
+        omega_dot_cmd = (omega_cmd - omega_prev) / dt
+
+        x_dot = speed_cmd * np.cos(heading_cmd)
+        y_dot = speed_cmd * np.sin(heading_cmd)
+        x_ddot = accel_cmd * np.cos(heading_cmd) - speed_cmd * omega_cmd * np.sin(heading_cmd)
+        y_ddot = accel_cmd * np.sin(heading_cmd) + speed_cmd * omega_cmd * np.cos(heading_cmd)
+
+        breakdown = self.power_breakdown(
+            x_dot=x_dot,
+            y_dot=y_dot,
+            x_ddot=x_ddot,
+            y_ddot=y_ddot,
+            psi=heading_cmd,
+            omega=omega_cmd,
+            omega_dot=omega_dot_cmd,
+        )
+        return float(breakdown["power_consumption_w"])
+
+    def F(self, x: ArrayLike, u: ArrayLike, dt: float) -> np.ndarray:
+        """Stateless discrete dynamics for SCP.
+
+        Uses state ``x = [X, Y, E, speed, heading, omega]`` and control
+        ``u = [speed, heading]``:
+
+            X+ = X + dt * speed * cos(heading)
+            Y+ = Y + dt * speed * sin(heading)
+            E+ = E - dt * max(P(x, u) - power_generation_w, 0)
+            speed+ = speed
+            heading+ = heading
+            omega+ = (heading - previous_heading) / dt
+        """
+
+        if dt <= 0.0:
+            raise ValueError("dt must be positive")
+        x = self._as_array(x)
+        u = self._as_array(u)
+        if x.shape[-1] < 6:
+            raise ValueError("SCP state must be [X, Y, E, speed, heading, omega]")
+
+        heading_prev = float(x[4])
+        speed_cmd = float(u[0])
+        heading_cmd = float(u[1])
+        omega_cmd = (heading_cmd - heading_prev) / dt
+        power_consumption_w = self.P(x, u, dt)
+        battery_discharge_rate_j_per_s = max(power_consumption_w - self.power_generation_w, 0.0)
+        return np.array(
+            [
+                x[0] + dt * speed_cmd * np.cos(heading_cmd),
+                x[1] + dt * speed_cmd * np.sin(heading_cmd),
+                max(x[2] - dt * battery_discharge_rate_j_per_s, 0.0),
+                speed_cmd,
+                heading_cmd,
+                omega_cmd,
+            ],
+            dtype=float,
+        )
+
     def linear_motion_power(
         self,
         x_dot: ArrayLike,
