@@ -1,25 +1,26 @@
 from functools import partial
 from dataclasses import dataclass, field
-from time import time
+from pathlib import Path
+import os
+import sys
 
 import cvxpy as cvx
 
+os.environ.setdefault("JAX_PLATFORM_NAME", "cpu")
 import jax
-import jax.numpy as jnp
-
-import matplotlib.pyplot as plt
 
 import numpy as np
 
-from tqdm.auto import tqdm
-
 MODELING_DIR = Path(__file__).resolve().parents[1] / "modeling"
+if str(MODELING_DIR) not in sys.path:
+    sys.path.insert(0, str(MODELING_DIR))
 from rover_dynamic_model import RoverModel
 
 @dataclass
 class SCP:
     n_state: int = 6     # state dimension
     m_control: int = 2   # control dimension
+    dt: float = 1.0
     eps: int = 1e-3      # SCP convergence tolerance
     final_time_s: float = 1.0
 
@@ -70,7 +71,7 @@ class SCP:
 
     @property
     def horizon_steps(self):
-        return int(round(self.final_time_s / self.dt))
+        return max(int(round(self.final_time_s / self.dt)), 2)
 
     # x0 = np.array([-1.0, -1.0, 0.0, 0.0])  # initial state
     # x_goal = np.array([1.0, 1.0, 0.0, 0.0])  # desired final state
@@ -86,15 +87,19 @@ class SCP:
     # )
     # radii = np.array([0.5, 0.5])
 
-    @partial(jax.jit, static_argnums=(0,))
-    @partial(jax.vmap, in_axes=(None, 0, 0))
     def affinize(self, f, x_bar, u_bar):
         """
         Affinize the function `f(s, u)` around `(x_bar, u_bar)`.
         First-order Taylor Expansion
         """
-        A,B = jax.jacobian(f, argnums=(0,1))(x_bar,u_bar)
-        c = f(x_bar,u_bar) - A @ x_bar - B @ u_bar
+        x_bar = np.asarray(x_bar)
+        u_bar = np.asarray(u_bar)
+        def one_step(x, u):
+            A, B = jax.jacobian(f, argnums=(0, 1))(x, u)
+            c = f(x, u) - A @ x - B @ u
+            return A, B, c
+
+        A, B, c = jax.vmap(one_step)(x_bar, u_bar)
         return np.array(A), np.array(B), np.array(c)
 
     # def nonlinear_dynamics_defect(self, x, u):
@@ -111,25 +116,25 @@ class SCP:
     def scp_iteration(self, x0, x_goal, x_prev, u_prev):
         """Solve a single SCP sub-problem for trajectory optimization."""
 
-        Af, Bf, cf = self.affinize(self.model.F, x_prev[:-1], u_prev)
-        Ap, Bp, cp = self.affinize(self.model.P, x_prev[:-1], u_prev)
+        Af, Bf, cf = self.affinize(lambda x, u: self.model.jax_F(x, u, self.dt), x_prev[:-1], u_prev)
+        Ap, Bp, pc = self.affinize(lambda x, u: self.model.jax_P(x, u, self.dt), x_prev[:-1], u_prev)
 
         x_opt = cvx.Variable((self.N + 1, self.n_state))    # X, Y, E, speed, heading, omega
         u_opt = cvx.Variable((self.N, self.m_control))      # speed, heading
-        nu_opt = cp.Variable((self.N, self.n_states))       # virtual dynamics control
+        nu_opt = cvx.Variable((self.N, self.n_state))       # virtual dynamics control
 
         constraints = [ x_opt[0,:] == x0,
                         x_opt[self.N,:] == x_goal ]
         objective = self.ct * self.final_time_s
 
         for t in range(self.N):
-            Power_cons = Ap @ x_opt[t,:] + Bp @ u_opt[t,:] + cp
+            Power_cons = Ap[t] @ x_opt[t,:] + Bp[t] @ u_opt[t,:] + pc[t]
 
             objective += self.ce * Power_cons * self.dt
-            objective += self.c_nu * cp.norm1(nu_opt[t,:])
+            objective += self.c_nu * cvx.norm1(nu_opt[t,:])
 
             constraints += [
-                            x_opt[t + 1,:] == Af @ x_opt[t,:] + Bf @ u_opt[t,:] + cf + nu_opt[t,:],
+                            x_opt[t + 1,:] == Af[t] @ x_opt[t,:] + Bf[t] @ u_opt[t,:] + cf[t] + nu_opt[t,:],
                             # P_k \in C_k     # corridor, from high-level path
                             u_opt[t,0] >= 0,
                             u_opt[t,0] <= self.v_max,
@@ -139,14 +144,17 @@ class SCP:
                             x_opt[t + 1,2] >= self.E_min,
                             x_opt[t + 1,2] <= self.E_max,
                             Power_cons <= self.P_cons_max,
-                            cp.norm_inf(x_opt[t,:] - x_opt[t,:]) <= self.rho_x,
-                            cp.norm_inf(u_opt[t,:] - u_opt[t,:]) <= self.rho_u,
+                            cvx.norm_inf(x_opt[t,:] - x_prev[t,:]) <= self.rho_x,
+                            cvx.norm_inf(u_opt[t,:] - u_prev[t,:]) <= self.rho_u,
                             ]
 
         prob = cvx.Problem(cvx.Minimize(objective), constraints)
-        prob.solve()
+        try:
+            prob.solve(solver=cvx.CLARABEL)
+        except cvx.error.SolverError:
+            prob.solve(solver=cvx.SCS, max_iters=5000, eps=1e-4, verbose=False)
 
-        if prob.status != "optimal":
+        if prob.status not in {"optimal", "optimal_inaccurate"}:
             raise RuntimeError("SCP solve failed. Problem status: " + prob.status)
         
         return x_opt.value, u_opt.value, nu_opt.value, prob.objective.value
@@ -157,11 +165,11 @@ class SCP:
 
         # Initialize trajectory
         if x_init is None or u_init is None:
-            x_bar = np.zeros((self.N + 1, self.n))
-            u_bar = np.zeros((self.N, self.m))
+            x_bar = np.zeros((self.N + 1, self.n_state))
+            u_bar = np.zeros((self.N, self.m_control))
             x_bar[0] = x0
             for k in range(self.N):
-                x_bar[k + 1] = self.model.f(x_bar[k], u_bar[k])
+                x_bar[k + 1] = self.model.F(x_bar[k], u_bar[k], self.dt)
         else:
             x_bar = np.copy(x_init)
             u_bar = np.copy(u_init)
