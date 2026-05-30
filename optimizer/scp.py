@@ -295,6 +295,9 @@ class SCP:
 
         # Define cost function and dynamics over the horizon
         for t in range(N):
+
+            # No se afiniza/lineariza en cada timestep de una iteracion del SCP
+            # es una vez por iteracion
             A_k, B_k, c_k = self.linearize_dynamics(x_bar[:, t], u_bar[:, t])
             p_x_k, p_u_k, p_c_k = self.linearize_power(x_bar[:, t], u_bar[:, t])
             P_cons_k = p_x_k @ x[:, t] + p_u_k @ u[:, t] + p_c_k
