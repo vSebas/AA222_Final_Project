@@ -38,8 +38,8 @@ class SCP:
         default_factory=lambda: RoverModel(
             battery_charge_j=20_000.0,
             power_generation_w=65.0,
-            phi=np.deg2rad(4.0),
-            xi=np.deg2rad(3.0),
+            phi=np.deg2rad(0.0),
+            xi=np.deg2rad(0.0),
         )
     )
 
