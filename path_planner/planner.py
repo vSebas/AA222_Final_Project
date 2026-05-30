@@ -285,6 +285,34 @@ def astar_with_clearance(tm: TerrainModel,
 
 
 # ======================================================================
+# Planner solution used by SCP
+# ======================================================================
+
+def build_planner_solution(start_req: Point = (-13_000.0, 0.0),
+                           goal_req: Point = (13_000.0, 0.0),
+                           w_risk: float = 10.0,
+                           n_resample: int = 80,
+                           smoothing_passes: int = 3):
+    """Build the high-level A* path used as the SCP warm start."""
+    tm = build_terrain()
+
+    start_cell = _nearest_traversable_cell(tm, *_metric_to_cell(tm, *start_req))
+    goal_cell = _nearest_traversable_cell(tm, *_metric_to_cell(tm, *goal_req))
+    if start_cell is None or goal_cell is None:
+        raise RuntimeError("Planner could not find traversable start/goal cells.")
+
+    start_m = _cell_to_metric(tm, *start_cell)
+    goal_m = _cell_to_metric(tm, *goal_cell)
+    raw_path = astar_on_terrain(tm, start_m, goal_m, w_risk=w_risk)
+    if raw_path is None:
+        raise RuntimeError("A* did not find a path between the selected endpoints.")
+
+    smooth_pts = smooth_path(raw_path, n_resample=n_resample,
+                             smoothing_passes=smoothing_passes)
+    return tm, raw_path, smooth_pts, start_m, goal_m
+
+
+# ======================================================================
 # Validation
 # ======================================================================
 
@@ -326,7 +354,15 @@ def _validate():
     print(" planner.py validation  (Stage-3 A* warm start)")
     print("=" * 70)
 
-    tm = build_terrain()
+    start_req = (-13_000.0, 0.0)
+    goal_req = (13_000.0, 0.0)
+    tm, path, smooth_pts, start_m, goal_m = build_planner_solution(
+        start_req=start_req,
+        goal_req=goal_req,
+        w_risk=10.0,
+        n_resample=80,
+        smoothing_passes=3,
+    )
     ext_km = tuple(e / 1e3 for e in tm.extent_m)
     print(f"DEM shape         : {tm.shape}")
     print(f"pixel scale (m)   : {tm.pixel_scale_m:.3f}")
@@ -335,13 +371,8 @@ def _validate():
     print(f"traversable frac  : {tm.traversable.mean():.2%}")
 
     # --- start / goal on opposite sides, snapped to traversable plain ---
-    start_req = (-13_000.0, 0.0)
-    goal_req = (13_000.0, 0.0)
-    s_cell = _nearest_traversable_cell(tm, *_metric_to_cell(tm, *start_req))
-    g_cell = _nearest_traversable_cell(tm, *_metric_to_cell(tm, *goal_req))
-    assert s_cell is not None and g_cell is not None, "no drivable endpoint"
-    start_m = _cell_to_metric(tm, *s_cell)
-    goal_m = _cell_to_metric(tm, *g_cell)
+    s_cell = _metric_to_cell(tm, *start_m)
+    g_cell = _metric_to_cell(tm, *goal_m)
     print(f"\nstart  : req {start_req} -> cell {s_cell} -> "
           f"({start_m[0]:.0f}, {start_m[1]:.0f}) m  "
           f"traversable={bool(tm.traversable[s_cell])}")
@@ -350,8 +381,6 @@ def _validate():
           f"traversable={bool(tm.traversable[g_cell])}")
 
     # --- A* at w_risk = 10 ----------------------------------------------
-    path = astar_on_terrain(tm, start_m, goal_m, w_risk=10.0)
-    assert path is not None, "A* found no path at w_risk=10"
     print(f"\nA* (w_risk=10)    : {len(path)} waypoints")
     assert _metric_to_cell(tm, *path[0]) == s_cell, "path does not start at start"
     assert _metric_to_cell(tm, *path[-1]) == g_cell, "path does not end at goal"
@@ -403,7 +432,6 @@ def _validate():
 
     # --- smooth + time-parameterize the w_risk=10 path ------------------
     raw10 = sweep[10.0][2]
-    smooth_pts = smooth_path(raw10, n_resample=80, smoothing_passes=3)
     assert math.isclose(smooth_pts[0][0], raw10[0][0]) and \
         math.isclose(smooth_pts[0][1], raw10[0][1]), "start not preserved"
     assert math.isclose(smooth_pts[-1][0], raw10[-1][0]) and \
