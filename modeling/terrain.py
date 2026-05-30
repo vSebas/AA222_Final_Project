@@ -63,9 +63,36 @@ LOLA_PIXEL_SCALE_M = 118.0
 LOLA_MOON_RADIUS_M = 1_737_400.0
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(THIS_DIR, "data")
-TABLE_DIR = os.path.join(THIS_DIR, "tables")
+PROJECT_DIR = os.path.dirname(THIS_DIR)
+MOON_DIR = os.path.join(PROJECT_DIR, "moon")
+
+if os.path.isdir(MOON_DIR) and MOON_DIR not in sys.path:
+    sys.path.insert(0, MOON_DIR)
+
+def _first_existing_dir(*paths: str) -> str:
+    for path in paths:
+        if os.path.isdir(path):
+            return path
+    return paths[0]
+
+def _first_dir_with_file(fname: str, *paths: str) -> str:
+    for path in paths:
+        if os.path.isfile(os.path.join(path, fname)):
+            return path
+    return _first_existing_dir(*paths)
+
 TIF_FNAME = "Lunar_LRO_LOLA_Global_LDEM_118m_Mar2014.tif"
+
+DATA_DIR = _first_dir_with_file(
+    TIF_FNAME,
+    os.path.join(THIS_DIR, "data"),
+    os.path.join(MOON_DIR, "data"),
+    "/run/media/saveas/pacman",
+)
+TABLE_DIR = _first_existing_dir(
+    os.path.join(THIS_DIR, "tables"),
+    os.path.join(MOON_DIR, "tables"),
+)
 
 
 # ======================================================================
@@ -448,6 +475,10 @@ def print_south_pole_craters(min_diameter_km: float = 20.0,
                              lat_max: float = -80.0) -> list:
     """Print Artemis-relevant south-pole craters from the real IAU CSV."""
     path = os.path.join(TABLE_DIR, "iau_approved_craters.csv")
+    if not os.path.exists(path):
+        print(f"\nSkipping crater table summary; missing {path}\n")
+        return []
+
     rows = []
     with open(path, newline="", encoding="utf-8") as f:
         for r in csv.DictReader(f):

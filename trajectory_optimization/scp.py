@@ -3,11 +3,7 @@ from pathlib import Path
 import sys
 
 import numpy as np
-
-try:
-    import cvxpy as cp
-except ModuleNotFoundError:
-    cp = None
+import cvxpy as cp
 
 MODELING_DIR = Path(__file__).resolve().parents[1] / "modeling"
 if str(MODELING_DIR) not in sys.path:
