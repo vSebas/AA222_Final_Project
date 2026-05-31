@@ -20,19 +20,16 @@ from rover_dynamic_model import RoverModel
 class SCP:
     n_state: int = 6     # state dimension
     m_control: int = 2   # control dimension
-    dt: float = 1.0
+    dt: float = 0.1
     eps: int = 1e-3      # SCP convergence tolerance
-    final_time_s: float = 1.0
-
-    N = 5           # MPC horizon
-    N_scp = 25       # maximum number of SCP iterations
+    N: int = 100         # MPC horizon
+    N_scp: int = 25      # maximum number of SCP iterations
+    final_time_s: float = 0.0
 
     model: RoverModel = field(
         default_factory=lambda: RoverModel(
             battery_charge_j=20_000.0,
             power_generation_w=65.0,
-            phi=np.deg2rad(0.0),
-            xi=np.deg2rad(0.0),
         )
     )
 
@@ -53,6 +50,9 @@ class SCP:
     eps_x: float = 1.0e-3
     eps_J: float = 1.0e-3
 
+    def __post_init__(self) -> None:
+        self.final_time_s = self.N * self.dt
+
     @property
     def v_max(self):
         return self.model.max_speed_mps
@@ -71,7 +71,7 @@ class SCP:
 
     @property
     def horizon_steps(self):
-        return max(int(round(self.final_time_s / self.dt)), 2)
+        return self.N
 
     # x0 = np.array([-1.0, -1.0, 0.0, 0.0])  # initial state
     # x_goal = np.array([1.0, 1.0, 0.0, 0.0])  # desired final state
@@ -182,6 +182,13 @@ class SCP:
         for i in range(self.N_scp):
             x_bar, u_bar, nu_bar, J_bar[i + 1] = self.scp_iteration(x0, x_goal, x_bar, u_bar)
             dJ_bar = np.abs(J_bar[i + 1] - J_bar[i])
+            self.history.append(
+                {
+                    "iteration": i,
+                    "objective": float(J_bar[i + 1]),
+                    "delta_objective": float(dJ_bar),
+                }
+            )
 
             # defect_dyn = self.nonlinear_dynamics_defect(x_bar, u_bar)
             # virtual_norm = float(np.max(np.abs(nu_bar)))

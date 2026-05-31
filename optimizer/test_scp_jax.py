@@ -56,7 +56,7 @@ def plot_solution(scp: SCP, x: np.ndarray, u: np.ndarray, output_path: Path) -> 
     axes[0, 0].grid(True)
     axes[0, 0].legend()
 
-    axes[0, 1].plot(t_state, x[2], color="tab:green", linewidth=2.0)
+    axes[0, 1].plot(t_state, x[:, 2], color="tab:green", linewidth=2.0)
     axes[0, 1].axhline(scp.E_min, color="black", linestyle="--", linewidth=1.0, label="E_min")
     axes[0, 1].set_title("Battery Energy")
     axes[0, 1].set_xlabel("time [s]")
@@ -105,7 +105,7 @@ def plot_solution(scp: SCP, x: np.ndarray, u: np.ndarray, output_path: Path) -> 
 
 
 def main():
-    scp = SCP(dt=1.0, final_time_s=1000.0)
+    scp = SCP(dt=1.0)# final_time_s=1000.0)
 
     start = np.array([0.0, 0.0, scp.model.battery_charge_j, 0.0, 0.0, 0.0], dtype=float)
     goal = np.array([500.0, 500.0, 0.0, 0.0, 0.0, 0.0], dtype=float)
