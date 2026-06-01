@@ -35,14 +35,14 @@ class RoverModel:
     inertia_z: float = 7.111679166666666
     gravity: float = 1.62
     c0: float = 63.54416662174218
-    max_speed_mps: float = 0.45
+    # max_speed_mps: float = 0.45
 
     # Power Params
     p_base: float = 100.0                       #   Required to maintain baseline onboard systems   (from paper)
     power_generation_w: float = 100.0           #   J/s (from Google)
     battery_charge_j: float = 0.0#20_000.0      #   Current battery charge  (user defined)
     battery_discharge_rate_j_per_s: float = 0.0 #   Rate to update battery charge (linear discharge)
-    power_consumption_w: float = 0.0            #   lin + rot + ... power
+    power_consumption_w: float = 0.0            #   motion + base power
     min_battery_charge_j: float = 0.0
     max_battery_charge_j: float | None = None
 

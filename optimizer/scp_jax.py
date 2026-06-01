@@ -37,7 +37,7 @@ class SCP:
 
     high_level_path: list = field(default_factory=list)
     history: list = field(default_factory=list)
-    corridor_radius_m: float = 1500.0
+    corridor_radius_m: float = 1.0
 
     beta_grow: float = 1.1
     beta_shrink: float = 0.5
@@ -101,7 +101,10 @@ class SCP:
         if len(pts) == 1:
             return np.repeat(pts[:1, :2], n_points, axis=0)
 
+        # Compute segment length
         seg = np.linalg.norm(np.diff(pts[:, :2], axis=0), axis=1)
+
+        # Build cum arch length per segment
         s = np.concatenate(([0.0], np.cumsum(seg)))
         if s[-1] <= 0.0:
             return np.repeat(pts[:1, :2], n_points, axis=0)
@@ -124,7 +127,7 @@ class SCP:
         objective = 0.0
         constraints = [ x_opt[0,:] == x0,
                         x_opt[self.N,:] == x_goal ]
-        # objective = self.ct * self.final_time_s
+        objective = self.ct * self.final_time_s
 
         for t in range(self.N):
             Power_cons = Ap[t] @ x_opt[t,:] + Bp[t] @ u_opt[t,:] + pc[t]
@@ -133,26 +136,30 @@ class SCP:
             objective += self.c_nu * cvx.norm1(nu_opt[t,:])
 
             constraints += [
+                            # Next state
                             x_opt[t + 1,:] == Af[t] @ x_opt[t,:] + Bf[t] @ u_opt[t,:] + cf[t] + nu_opt[t,:],
+                            # Corridor
                             cvx.norm_inf(x_opt[t, :2] - path_xy[t]) <= self.corridor_radius_m,
                             cvx.norm_inf(x_opt[t + 1, :2] - path_xy[t + 1]) <= self.corridor_radius_m,
                             u_opt[t,0] >= 0,
                             u_opt[t,0] <= self.v_max,
-                            # accel constraints
+                            # accel constraints missing
                             x_opt[t,2] >= self.E_min,
                             x_opt[t,2] <= self.E_max,
                             x_opt[t + 1,2] >= self.E_min,
                             x_opt[t + 1,2] <= self.E_max,
                             Power_cons <= self.P_cons_max,
+
                             cvx.norm_inf(x_opt[t,:] - x_prev[t,:]) <= self.rho_x,
                             cvx.norm_inf(u_opt[t,:] - u_prev[t,:]) <= self.rho_u,
                             ]
 
         prob = cvx.Problem(cvx.Minimize(objective), constraints)
-        try:
-            prob.solve(solver=cvx.CLARABEL)
-        except cvx.error.SolverError:
-            prob.solve(solver=cvx.SCS, max_iters=5000, eps=1e-4, verbose=False)
+        prob.solve()
+        # try:
+        #     prob.solve(solver=cvx.CLARABEL)
+        # except cvx.error.SolverError:
+        #     prob.solve(solver=cvx.SCS, max_iters=5000, eps=1e-4, verbose=False)
 
         if prob.status not in {"optimal", "optimal_inaccurate"}:
             raise RuntimeError("SCP solve failed. Problem status: " + prob.status)
