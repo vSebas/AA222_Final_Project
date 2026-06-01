@@ -1,0 +1,25 @@
+Planner + SCP run summary
+raw_waypoints=312
+high_level_waypoints=40
+chunks=10
+total_horizon_steps=766
+total_time_s=152135.009420
+trajectory_length_m=42018.205360
+initial_battery_j=5000000.000000
+final_battery_j=2329981.508685
+energy_used_power_integral_j=17883519.433292
+nonlinear_dynamics_defect=0.000000e+00
+max_power_w=117.629411
+mean_power_w=117.550207
+
+Chunks
+chunk=1, N=766, dt=198.609673, final_time_s=152135.009420, Tf_min=9738.386278, Tf_max=21911.369125, iterations=250, accepted=0, rejected=250
+chunk=2, N=77, dt=198.145289, final_time_s=15257.187281, Tf_min=9389.038327, Tf_max=21125.336235, iterations=25, accepted=0, rejected=25
+chunk=3, N=81, dt=197.631980, final_time_s=16008.190414, Tf_min=9937.492147, Tf_max=22165.186727, iterations=25, accepted=0, rejected=25
+chunk=4, N=76, dt=199.963877, final_time_s=15197.254680, Tf_min=9352.156726, Tf_max=21042.352634, iterations=25, accepted=0, rejected=25
+chunk=5, N=80, dt=198.186490, final_time_s=15854.919167, Tf_min=9756.873334, Tf_max=21952.965001, iterations=25, accepted=0, rejected=25
+chunk=6, N=78, dt=198.882784, final_time_s=15512.857187, Tf_min=9546.373654, Tf_max=21479.340721, iterations=25, accepted=0, rejected=25
+chunk=7, N=78, dt=198.545196, final_time_s=15486.525257, Tf_min=9530.169389, Tf_max=21442.881125, iterations=25, accepted=0, rejected=25
+chunk=8, N=80, dt=199.344455, final_time_s=15947.556432, Tf_min=9813.880881, Tf_max=22081.231983, iterations=25, accepted=0, rejected=25
+chunk=9, N=76, dt=199.238027, final_time_s=15142.090073, Tf_min=9318.209276, Tf_max=20965.970871, iterations=25, accepted=0, rejected=25
+chunk=10, N=60, dt=198.392520, final_time_s=11903.551225, Tf_min=7325.262292, Tf_max=16481.840158, iterations=25, accepted=0, rejected=25

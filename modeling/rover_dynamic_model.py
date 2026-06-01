@@ -303,9 +303,7 @@ class RoverModel:
             [
                 x[0] + dt * speed_cmd * np.cos(heading_cmd),
                 x[1] + dt * speed_cmd * np.sin(heading_cmd),
-                # TODO: remove this clipping once SCP reliably enforces
-                # E_min <= E_k <= E_max; clipping can hide energy infeasibility.
-                max(x[2] - dt * battery_discharge_rate_j_per_s, 0.0),
+                x[2] - dt * battery_discharge_rate_j_per_s,
                 speed_cmd,
                 heading_cmd,
                 omega_cmd,
@@ -332,9 +330,7 @@ class RoverModel:
             (
                 x[..., 0] + dt * speed_cmd * jnp.cos(heading_cmd),
                 x[..., 1] + dt * speed_cmd * jnp.sin(heading_cmd),
-                # TODO: remove this clipping once SCP reliably enforces
-                # E_min <= E_k <= E_max; clipping can hide energy infeasibility.
-                jnp.maximum(x[..., 2] - dt * battery_discharge_rate_j_per_s, 0.0),
+                x[..., 2] - dt * battery_discharge_rate_j_per_s,
                 speed_cmd,
                 heading_cmd,
                 omega_cmd,

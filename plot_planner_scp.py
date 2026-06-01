@@ -15,10 +15,12 @@ from optimizer.scp_jax import SCP
 from path_planner.planner import build_planner_solution
 
 OUTPUT_PATH = PROJECT_DIR / "planner_scp_solution.png"
-NOMINAL_SPEED_MPS = 0.4
+LOG_PATH = PROJECT_DIR / "planner_scp_solution.log"
+HISTORY_PATH = PROJECT_DIR / "planner_scp_history.csv"
 SEGMENT_WAYPOINTS = 5
-SEGMENT_DT_S = 100.0
+SEGMENT_DT_S = 200.0
 MIN_SEGMENT_STEPS = 30
+SLOW_SPEED_MPS = 0.2
 
 def path_length(points: np.ndarray) -> float:
     if len(points) < 2:
@@ -52,12 +54,23 @@ def build_planner_path(n_waypoints: int = 40):
 
 def build_scp_from_path(path_points, dt_s: float = SEGMENT_DT_S) -> SCP:
     points = np.asarray(path_points, dtype=float)
-    T_f = path_length(points) / NOMINAL_SPEED_MPS
-    horizon_steps = max(MIN_SEGMENT_STEPS, int(np.ceil(T_f / dt_s)))
-    dt = T_f / horizon_steps if T_f > 0.0 else dt_s
+    length = path_length(points)
+    vmax = 0.45
+    if length > 0.0:
+        Tf_min = length / vmax
+        Tf_max = length / SLOW_SPEED_MPS
+    else:
+        Tf_min = dt_s
+        Tf_max = 2.0 * dt_s
+    Tf_guess = 0.5 * (Tf_min + Tf_max)
+    horizon_steps = max(MIN_SEGMENT_STEPS, int(np.ceil(Tf_guess / dt_s)))
+    dt = Tf_guess / horizon_steps if Tf_guess > 0.0 else dt_s
     return SCP(
         dt=dt,
         N=horizon_steps,
+        Tf_min=Tf_min,
+        Tf_max=Tf_max,
+        rho_Tf=max(dt_s, 0.25 * (Tf_max - Tf_min)),
         high_level_path=[point.tolist() for point in points],
     )
 
@@ -109,7 +122,6 @@ def build_warm_start(
     for k in range(scp.N):
         x_init[k + 1] = scp.model.F(x_init[k], u_init[k])
     return x_init, u_init
-    return x_init, u_init
 
 
 def path_chunks(points: np.ndarray, chunk_waypoints: int = SEGMENT_WAYPOINTS):
@@ -143,7 +155,8 @@ def solve_chunked_path(path_points: np.ndarray):
         goal_position = chunk[-1, :2]
         print(
             f"chunk {i}: length={path_length(chunk):.1f} m, "
-            f"N={scp.N}, dt={scp.dt:.2f} s"
+            f"N={scp.N}, dt_guess={scp.dt:.2f} s, "
+            f"Tf_bounds=[{scp.Tf_min:.1f}, {scp.Tf_max:.1f}] s"
         )
         x_star, u_star = scp.solve_scp(
             start_state,
@@ -160,13 +173,91 @@ def solve_chunked_path(path_points: np.ndarray):
         else:
             x_parts.append(x_star)
         u_parts.append(u_star)
-        dt_parts.append(np.full(u_star.shape[0], scp.dt))
+        dt_parts.append(np.full(u_star.shape[0], scp.final_time_s / scp.N))
         scps.append(scp)
         x_prev_final = x_star[-1].copy()
 
     if not x_parts:
         raise RuntimeError("No path chunks were generated.")
     return np.vstack(x_parts), np.vstack(u_parts), np.concatenate(dt_parts), scps
+
+
+def write_run_logs(
+    log_path: Path,
+    history_path: Path,
+    raw_path,
+    high_level_path: np.ndarray,
+    x_star: np.ndarray,
+    u_star: np.ndarray,
+    dt_values: np.ndarray,
+    scps: list[SCP],
+) -> None:
+    total_time = float(np.sum(dt_values))
+    total_distance = path_length(x_star)
+    defect = dynamics_defect(scps[0], x_star, u_star, dt_values)
+    powers = power_trace(scps[0], x_star, u_star, dt_values)
+    energy_used = float(np.sum(powers * dt_values))
+
+    with log_path.open("w", encoding="utf-8") as f:
+        f.write("Planner + SCP run summary\n")
+        f.write(f"raw_waypoints={len(raw_path)}\n")
+        f.write(f"high_level_waypoints={len(high_level_path)}\n")
+        f.write(f"chunks={len(scps)}\n")
+        f.write(f"total_horizon_steps={u_star.shape[0]}\n")
+        f.write(f"total_time_s={total_time:.6f}\n")
+        f.write(f"trajectory_length_m={total_distance:.6f}\n")
+        f.write(f"initial_battery_j={x_star[0, 2]:.6f}\n")
+        f.write(f"final_battery_j={x_star[-1, 2]:.6f}\n")
+        f.write(f"energy_used_power_integral_j={energy_used:.6f}\n")
+        f.write(f"nonlinear_dynamics_defect={defect:.6e}\n")
+        f.write(f"max_power_w={float(np.max(powers)):.6f}\n")
+        f.write(f"mean_power_w={float(np.mean(powers)):.6f}\n")
+        f.write("\nChunks\n")
+        for i, scp in enumerate(scps, start=1):
+            accepted = sum(1 for entry in scp.history if entry.get("accepted"))
+            rejected = sum(1 for entry in scp.history if not entry.get("accepted", True))
+            f.write(
+                f"chunk={i}, N={scp.N}, dt={scp.final_time_s / scp.N:.6f}, "
+                f"final_time_s={scp.final_time_s:.6f}, "
+                f"Tf_min={scp.Tf_min:.6f}, Tf_max={scp.Tf_max:.6f}, "
+                f"iterations={len(scp.history)}, accepted={accepted}, rejected={rejected}\n"
+            )
+
+    fields = [
+        "global_iteration",
+        "chunk",
+        "local_iteration",
+        "accepted",
+        "objective",
+        "candidate_objective",
+        "merit",
+        "candidate_merit",
+        "delta_merit",
+        "defect",
+        "candidate_defect",
+        "virtual",
+        "candidate_virtual",
+        "final_time_s",
+        "candidate_final_time_s",
+        "dt",
+        "candidate_dt",
+        "rho_state_max",
+        "rho_u",
+        "rho_Tf",
+    ]
+    with history_path.open("w", encoding="utf-8") as f:
+        f.write(",".join(fields) + "\n")
+        global_iter = 0
+        for chunk_id, scp in enumerate(scps, start=1):
+            for local_iter, entry in enumerate(scp.history):
+                row = {
+                    "global_iteration": global_iter,
+                    "chunk": chunk_id,
+                    "local_iteration": local_iter,
+                    **entry,
+                }
+                f.write(",".join(str(row.get(field, "")) for field in fields) + "\n")
+                global_iter += 1
 
 
 def plot_results(
@@ -315,6 +406,9 @@ def main() -> None:
     print(f"Trajectory length: {path_length(x_plot):.1f} m")
     print(f"Final battery: {x_plot[-1, 2]:.2f} J")
     print(f"Nonlinear dynamics defect: {dynamics_defect(scp, x_plot, u_plot, dt_values):.3e}")
+    write_run_logs(LOG_PATH, HISTORY_PATH, raw_path, high_level_path, x_star, u_star, dt_values, scps)
+    print(f"Saved run log: {LOG_PATH}")
+    print(f"Saved history log: {HISTORY_PATH}")
 
 if __name__ == "__main__":
     main()
