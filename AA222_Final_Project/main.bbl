@@ -1,4 +1,4 @@
-\begin{thebibliography}{14}
+\begin{thebibliography}{16}
 \newcommand{\enquote}[1]{``#1''}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
@@ -50,6 +50,13 @@ Smith, D.~E., Zuber, M.~T., Jackson, G.~B., Cavanaugh, J.~F., Neumann, G.~A., Ri
 \bibitem[{Hart et~al.(1968)Hart, Nilsson, and Raphael}]{hart1968astar}
 Hart, P.~E., Nilsson, N.~J., and Raphael, B., \enquote{A Formal Basis for the Heuristic Determination of Minimum Cost Paths,} \emph{IEEE Transactions on Systems Science and Cybernetics}, Vol.~4, No.~2, 1968, pp. 100--107.
 \newblock \doi{10.1109/TSSC.1968.300136}.
+
+\bibitem[{Bradbury et~al.(2018)Bradbury, Frostig, Hawkins, Johnson, Katariya, Leary, Maclaurin, Necula, Paszke, Vander{P}las, Wanderman-{M}ilne, and Zhang}]{jax2018github}
+Bradbury, J., Frostig, R., Hawkins, P., Johnson, M.~J., Katariya, Y., Leary, C., Maclaurin, D., Necula, G., Paszke, A., Vander{P}las, J., Wanderman-{M}ilne, S., and Zhang, Q., \enquote{{JAX}: composable transformations of {P}ython+{N}um{P}y programs,} , 2018.
+\newblock \urlprefix\url{http://github.com/jax-ml/jax}.
+
+\bibitem[{Diamond and Boyd(2016)}]{diamond2016cvxpy}
+Diamond, S., and Boyd, S., \enquote{{CVXPY}: {A} {P}ython-embedded modeling language for convex optimization,} \emph{Journal of Machine Learning Research}, Vol.~17, No.~83, 2016, pp. 1--5.
 
 \bibitem[{Duchi(2018)}]{duchi2018scp}
 Duchi, J., \enquote{Sequential Convex Programming,} , 2018.

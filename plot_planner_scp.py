@@ -15,8 +15,10 @@ from optimizer.scp_jax import SCP
 from path_planner.planner import build_planner_solution
 
 OUTPUT_PATH = PROJECT_DIR / "planner_scp_solution.png"
+ZOOM_OUTPUT_PATH = PROJECT_DIR / "planner_scp_solution_1000s.png"
 LOG_PATH = PROJECT_DIR / "planner_scp_solution.log"
 HISTORY_PATH = PROJECT_DIR / "planner_scp_history.csv"
+TRAJECTORY_PATH = PROJECT_DIR / "planner_scp_trajectory.npz"
 SEGMENT_WAYPOINTS = 5
 SEGMENT_DT_S = 200.0
 MIN_SEGMENT_STEPS = 30
@@ -260,6 +262,46 @@ def write_run_logs(
                 global_iter += 1
 
 
+def save_trajectory_cache(
+    output_path: Path,
+    raw_path,
+    high_level_path: np.ndarray,
+    x_star: np.ndarray,
+    u_star: np.ndarray,
+    dt_values: np.ndarray,
+) -> None:
+    t_control = np.concatenate(([0.0], np.cumsum(dt_values[:-1])))
+    t_state = np.concatenate(([0.0], np.cumsum(dt_values)))
+    scp = SCP()
+    power_w = power_trace(scp, x_star, u_star, dt_values)
+    energy_stage_j = power_w * dt_values
+    cumulative_energy_j = np.concatenate(([0.0], np.cumsum(energy_stage_j)))
+    battery_rollout_j = nonlinear_rollout(scp, x_star[0], u_star, dt_values)[:, 2]
+    final_time_s = float(t_state[-1])
+    J_energy = float(np.sum(energy_stage_j))
+    J_time = final_time_s
+    J_total = J_energy + J_time
+    np.savez_compressed(
+        output_path,
+        raw_path=np.asarray(raw_path, dtype=float),
+        high_level_path=np.asarray(high_level_path, dtype=float),
+        x_star=np.asarray(x_star, dtype=float),
+        u_star=np.asarray(u_star, dtype=float),
+        dt_values=np.asarray(dt_values, dtype=float),
+        t_state=t_state,
+        t_control=t_control,
+        power_w=power_w,
+        energy_stage_j=energy_stage_j,
+        cumulative_energy_j=cumulative_energy_j,
+        battery_state_j=x_star[:, 2],
+        battery_rollout_j=battery_rollout_j,
+        final_time_s=np.array(final_time_s),
+        J_energy=np.array(J_energy),
+        J_time=np.array(J_time),
+        J_total=np.array(J_total),
+    )
+
+
 def plot_results(
     terrain,
     raw_path,
@@ -271,6 +313,7 @@ def plot_results(
     u_star: np.ndarray | None,
     dt_values: np.ndarray,
     output_path: Path,
+    time_limit_s: float | None = None,
 ) -> None:
     raw = np.asarray(raw_path, dtype=float)
     smooth = np.asarray(smooth_path, dtype=float)
@@ -278,6 +321,15 @@ def plot_results(
     u_plot = u_star if u_star is not None else u_nominal
     t_control = np.concatenate(([0.0], np.cumsum(dt_values[:-1])))
     t_state = np.concatenate(([0.0], np.cumsum(dt_values)))
+    if time_limit_s is not None:
+        control_count = int(np.searchsorted(t_control, time_limit_s, side="right"))
+        control_count = max(1, min(control_count, u_plot.shape[0]))
+        state_count = min(control_count + 1, x_plot.shape[0])
+        x_plot = x_plot[:state_count]
+        u_plot = u_plot[:control_count]
+        dt_values = dt_values[:control_count]
+        t_control = np.concatenate(([0.0], np.cumsum(dt_values[:-1])))
+        t_state = np.concatenate(([0.0], np.cumsum(dt_values)))
     power = power_trace(scp, x_plot, u_plot, dt_values)
     x_rollout = nonlinear_rollout(scp, x_plot[0], u_plot, dt_values)
 
@@ -290,7 +342,8 @@ def plot_results(
     axes[0, 0].plot(raw[:, 0] / 1e3, raw[:, 1] / 1e3, color="white", lw=1.2, label="A* raw")
     axes[0, 0].plot(smooth[:, 0] / 1e3, smooth[:, 1] / 1e3, color="lime", lw=2.0, label="smoothed path")
     axes[0, 0].plot(x_plot[:, 0] / 1e3, x_plot[:, 1] / 1e3, color="cyan", lw=2.0, label="SCP trajectory")
-    axes[0, 0].set_title("Planner Path and SCP Trajectory")
+    title_suffix = "" if time_limit_s is None else f" (first {time_limit_s:.0f} s)"
+    axes[0, 0].set_title("Planner Path and SCP Trajectory" + title_suffix)
     axes[0, 0].set_xlabel("x [km]")
     axes[0, 0].set_ylabel("y [km]")
     axes[0, 0].legend(loc="best")
@@ -375,6 +428,7 @@ def main() -> None:
 
     high_level_path = np.asarray(high_level_path, dtype=float)
     x_star, u_star, dt_values, scps = solve_chunked_path(high_level_path)
+    save_trajectory_cache(TRAJECTORY_PATH, raw_path, high_level_path, x_star, u_star, dt_values)
     x_init, u_init = x_star, u_star
     scp = scps[0]
     scp.final_time_s = sum(local_scp.final_time_s for local_scp in scps)
@@ -394,10 +448,24 @@ def main() -> None:
     scp.history = history
 
     plot_results(terrain, raw_path, high_level_path, scp, x_init, u_init, x_star, u_star, dt_values, OUTPUT_PATH)
+    plot_results(
+        terrain,
+        raw_path,
+        high_level_path,
+        scp,
+        x_init,
+        u_init,
+        x_star,
+        u_star,
+        dt_values,
+        ZOOM_OUTPUT_PATH,
+        time_limit_s=1000.0,
+    )
     x_plot = x_star
     u_plot = u_star
 
     print(f"Saved planner + SCP plot: {OUTPUT_PATH}")
+    print(f"Saved first-1000s plot: {ZOOM_OUTPUT_PATH}")
     print(f"Planner raw waypoints: {len(raw_path)}")
     print(f"SCP high-level path waypoints: {len(high_level_path)}")
     print(f"SCP chunks: {len(scps)}")
@@ -409,6 +477,7 @@ def main() -> None:
     write_run_logs(LOG_PATH, HISTORY_PATH, raw_path, high_level_path, x_star, u_star, dt_values, scps)
     print(f"Saved run log: {LOG_PATH}")
     print(f"Saved history log: {HISTORY_PATH}")
+    print(f"Saved trajectory cache: {TRAJECTORY_PATH}")
 
 if __name__ == "__main__":
     main()

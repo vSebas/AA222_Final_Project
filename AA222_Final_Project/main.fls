@@ -161,6 +161,8 @@ INPUT /usr/share/texmf-dist/tex/latex/tools/tabularx.sty
 INPUT /usr/share/texmf-dist/tex/latex/tools/tabularx.sty
 INPUT /usr/share/texmf-dist/tex/latex/caption/subcaption.sty
 INPUT /usr/share/texmf-dist/tex/latex/caption/subcaption.sty
+INPUT /usr/share/texmf-dist/tex/latex/placeins/placeins.sty
+INPUT /usr/share/texmf-dist/tex/latex/placeins/placeins.sty
 INPUT /usr/share/texmf-dist/tex/latex/graphics/color.sty
 INPUT /usr/share/texmf-dist/tex/latex/graphics/color.sty
 INPUT /usr/share/texmf-dist/tex/latex/graphics-cfg/color.cfg

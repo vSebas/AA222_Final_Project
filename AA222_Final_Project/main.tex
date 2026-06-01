@@ -8,6 +8,7 @@
 \usepackage{longtable,tabularx}
 \usepackage{url}
 \usepackage{subcaption}
+\usepackage[section]{placeins}
 \setlength\LTleft{0pt}
 \graphicspath{{figures/}{./}}
 
@@ -35,7 +36,7 @@ The formulation is motivated by prior work on energy-constrained rover routing a
 \section{Problem Formulation}
 
 \subsection{Rover Dynamics and Power Model}
-The rover dynamics and power model is adapted from an energy-constrained planetary rover formulation that couples rover motion with translational, rotational, resistive, and baseline subsystem power terms~\cite{hu2025rover}. A reduced-order version is used here: the rover is represented in planar coordinates, the optimizer commands speed and heading, and the power model maps commanded motion and terrain resistance to battery depletion.
+The rover dynamics and power models are adapted from an energy-constrained planetary rover formulation that couples rover motion with translational, rotational, resistive, and baseline subsystem power terms~\cite{hu2025rover}. A reduced-order version is used here: the rover is represented in planar coordinates, the optimizer commands speed and heading, and the power model maps commanded motion and terrain resistance to battery depletion.
 
 The discrete rover state is
 \begin{equation}
@@ -151,7 +152,7 @@ An 8-connected A$^\ast$ planner is then run on the traversability mask~\cite{har
 where $d_{ij}$ is the Euclidean step distance and $\bar{R}_{ij}$ is the average endpoint risk. This cost trades path length against terrain exposure and approximates a discrete line integral of terrain risk. The A$^\ast$ heuristic is the straight-line distance to the goal, which remains admissible because every edge cost is at least its geometric length.
 
 \subsection{Sequential Convex Programming Implementation}
-The nonlinear OCP in Eq.~\eqref{eq:ocp} is implemented using sequential convex programming. At each SCP iteration, the rover dynamics, power constraint, and stage-energy expression are linearized about the current nominal trajectory $(\bar{x}_k,\bar{u}_k,\bar{T}_f)$. JAX is used to compute the required Jacobians, and CVXPY is used to solve the convex subproblem.
+The nonlinear OCP in Eq.~\eqref{eq:ocp} is implemented using sequential convex programming. At each SCP iteration, the rover dynamics, power constraint, and stage-energy expression are linearized about the current nominal trajectory $(\bar{x}_k,\bar{u}_k,\bar{T}_f)$. JAX \cite{jax2018github} is used to compute the required Jacobians, and CVXPY \cite{diamond2016cvxpy} is used to solve the convex subproblem.
 
 The affine dynamics approximation is
 \begin{equation}
@@ -239,11 +240,10 @@ Figure~\ref{fig:terrain} validates the terrain representation. Figure~\ref{fig:m
 \label{fig:terrain}
 \end{figure}
 
-
 \section{Results and Discussion}
 The proposed planner--trajectory-generation pipeline successfully generated a lunar rover route from the prescribed start location to the goal across cratered terrain. As shown in Fig.~\ref{fig:terrain}, the terrain module converts the elevation map into traversability and risk information that marks steep crater-wall and rim regions as undesirable. A$^\ast$ then produced a high-level route around the high-risk terrain, and the trajectory stage produced a time--energy trajectory along this route while enforcing the implemented rover dynamics, power limits, battery bounds, and rate constraints.
 
-The terrain pipeline provides a useful validation of the benchmark before trajectory optimization. The synthetic crater has elevation ranging from approximately \SI{-702}{m} to \SI{291}{m}, and the slope field reaches approximately $25.6^\circ$ inside the wall annulus. The traversability mask leaves approximately $73.3\%$ of the map drivable: the crater floor and surrounding plains remain available, while the steep wall and rim annulus are excluded or assigned high risk. This confirms that the terrain layer separates the hazardous crater boundary from the lower-risk regions available for routing.
+The terrain pipeline provides a useful validation of the benchmark before trajectory generation. The synthetic crater has elevation ranging from approximately \SI{-702}{m} to \SI{291}{m}, and the slope field reaches approximately $25.6^\circ$ inside the wall annulus. The traversability mask leaves approximately $73.3\%$ of the map drivable: the crater floor and surrounding plains remain available, while the steep wall and rim annulus are excluded or assigned high risk. This confirms that the terrain layer separates the hazardous crater boundary from the lower-risk regions available for routing.
 
 The global planner then verifies that the risk field induces the intended distance--risk tradeoff. With $w_{\mathrm{risk}}=10$, A$^\ast$ returns a 312-waypoint route with length approximately \SI{43.25}{km}. Its path-integrated terrain risk is approximately $9.99\times10^2$, compared with $7.20\times10^5$ for the straight-line baseline. Thus, the planner reduces terrain exposure by roughly $721\times$ at a $1.66\times$ increase in path length. This confirms that the terrain cost discourages short but hazardous crossings and instead produces a feasible warm start for the trajectory-generation stage.
 
@@ -265,18 +265,17 @@ Straight-line baseline & 26.08 & $7.20\times10^5$ \\
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:risk_weight_sweep} shows the planner tradeoff more directly. Increasing $w_{\mathrm{risk}}$ increases the route length but decreases path-integrated risk, producing a clear distance--risk Pareto trend. This behavior is consistent with the planner edge cost, which combines geometric distance with an approximation of terrain-risk exposure.
+Table~\ref{tab:risk_weight_sweep} shows the planner tradeoff more directly. Increasing $w_{\mathrm{risk}}$ increases the route length but decreases path-integrated risk, producing a clear distance--risk Pareto trend. This behavior is consistent with the planner edge cost, which combines geometric distance with a trapezoidal approximation of terrain-risk exposure. The agreement between the planner cost and the path-integrated risk metric provides an internal consistency check: the same risk field used to evaluate terrain exposure is also what drives the global route away from hazardous regions.
 
 The full-route trajectory covers approximately \SI{42.0}{km} and reaches the goal in approximately \SI{152135}{s}, or \SI{42.3}{h}. The trajectory remains battery-feasible throughout the traverse: starting from \SI{5.0}{MJ}, the rover finishes with approximately \SI{2.33}{MJ} of remaining battery energy. These results show that the navigation objective was achieved for the benchmark terrain and simplified rover model.
 
+The trajectory-generation stage should be interpreted as a local feasibility and time--energy refinement stage around the planner route. The global terrain detour is primarily determined by A$^\ast$ through the risk-weighted terrain cost, while the SCP stage enforces the rover dynamics, power limits, battery bounds, rate constraints, and corridor constraints along the route. This decomposition is appropriate for the current implementation because it avoids requiring the local optimizer to solve the global obstacle-avoidance problem from scratch.
+
 The panels in Fig.~\ref{fig:main_results} separate the geometric, energy, and command behavior of the returned solution. Figure~\ref{fig:trajectory} shows that the trajectory follows the smoothed A$^\ast$ route while avoiding the high-risk terrain identified by the terrain layer. Figure~\ref{fig:battery} shows that battery energy remains within the imposed bounds. Figure~\ref{fig:speed} shows that the solution remains within the rover speed limit and uses a mostly steady low-speed traverse over the long route. Figure~\ref{fig:power} shows modeled power demand over time. Figure~\ref{fig:heading} shows the heading command required to follow the curved route.
 
-The time--energy objective is reflected in the long-duration, low-speed solution. This lets the trajectory-generation stage balance traversal time, energy use, and feasibility constraints. The battery decrease is smaller than the integral of modeled power demand because the battery model subtracts the constant generation offset. The nearly constant power trace is mainly a consequence of the reduced-order energy model, where power is dominated by the baseline load and low-order motion-dependent terms. It should therefore be interpreted as an energy-accounting result rather than a high-fidelity prediction of terrain-dependent electrical load.
+The time--energy objective is reflected in the long-duration, low-speed solution. However, the energy model is simplified: power demand is dominated by the baseline load and a low-order resistance term, while slip, sinkage, detailed wheel--soil interaction, active recharge, and spatially varying solar generation are not modeled explicitly. As a result, the nearly constant power trace should be interpreted as a feasibility-level energy estimate rather than a high-fidelity prediction of rover electrical load. The battery decrease is smaller than the integral of modeled power demand because the battery update subtracts the constant generation offset.
 
 Overall, the experiment demonstrates that the proposed decomposition is effective for the intended benchmark. The global planner provides terrain feasibility over a hazardous map, and the trajectory stage returns a dynamically consistent, battery-feasible route to the goal. This supports the use of a planner-plus-trajectory-generation architecture for long-horizon rover navigation over cratered lunar terrain.
-
-
-
 
 \begin{figure}[h]
 \centering
@@ -319,18 +318,21 @@ Overall, the experiment demonstrates that the proposed decomposition is effectiv
 \label{fig:main_results}
 \end{figure}
 
+\FloatBarrier
+
 \section{Conclusion}
-This project implemented a lunar rover navigation pipeline that combines terrain-aware global planning with SCP-based trajectory-generation. The terrain module produces a traversability map and risk field, the A$^\ast$ planner generates a feasible high-level route, and the rover model converts that route into a dynamically consistent time--energy trajectory. The formulation permits segment final time to vary rather than imposing a fixed nominal traversal speed.
+This project implemented a lunar rover navigation pipeline that combines terrain-aware global planning with SCP-based trajectory generation. The terrain module converts a LOLA-format elevation representation into traversability and risk fields, A$^\ast$ generates a feasible high-level route, and the trajectory-generation stage enforces rover dynamics, power, battery, rate, and corridor constraints along that route.
 
-The benchmark result shows that the pipeline achieves the main objective of lunar rover navigation across cratered terrain. The returned route covers approximately \SI{42.0}{km}, reaches the goal in approximately \SI{42.3}{h}, satisfies the nonlinear rover dynamics to numerical precision, and remains battery-feasible under the implemented energy model. Thus, the proposed method successfully produces a feasible time--energy trajectory for the simplified rover model and mission scenario considered in this work.
+The benchmark result shows that the pipeline achieves the main navigation objective for the cratered terrain scenario. The planner avoids the hazardous crater-wall region, reducing path-integrated terrain risk by approximately $721\times$ relative to the straight-line baseline at a $1.66\times$ length cost. The returned trajectory covers approximately \SI{42.0}{km}, reaches the goal in approximately \SI{42.3}{h}, satisfies the nonlinear rover dynamics to numerical precision, and remains battery-feasible under the implemented energy model.
 
-The main limitations are associated with model fidelity and the prototype SCP implementation. The energy model uses a simplified power representation with a constant generation offset and does not model active recharging, spatially varying solar incidence, slip, sinkage, or detailed wheel--soil interaction. In addition, the SCP merit-filtering and trust-region logic are conservative in the current implementation, so further tuning is needed to make the local refinement stage consistently accept improving trajectory updates.
-
-Future work should couple terrain and trajectory optimization more tightly by adding continuous terrain-risk or terrain-resistance terms directly inside the trajectory optimizer. The energy model should also be extended to support active recharge, spatially varying solar generation, terrain-dependent resistance along the route, and more realistic terramechanics. Finally, evaluating the method on a larger set of LOLA-derived lunar terrain maps would provide a more representative assessment for south-pole mission planning~\cite{nasa_lola,moon_sokolov}.
-
+The main limitations are the synthetic benchmark, simplified energy model, and prototype local optimizer. The terrain does not include polar shadowing or illumination variation, and the energy model does not explicitly capture active recharge, spatially varying solar incidence, slip, sinkage, or detailed wheel--soil interaction. Future work should add terrain-risk or terrain-resistance terms directly to the local trajectory objective, improve the energy model, and evaluate the pipeline on polar LOLA-derived terrain for lunar south-pole mission planning~\cite{nasa_lola,moon_sokolov}.
 
 \section{Contributions}
-Martin Zhou implemented the terrain pipeline, global planning stack, and the planner/SCP integration used in the final benchmark. Sebastian Martinez implemented and refined the rover dynamics model, the JAX-based SCP linearization path, and the supporting trajectory optimization tests. Both authors contributed to the paper writing and revision.
+Martin Zhou implemented the terrain pipeline, global planning stack, and the planner/SCP integration used in the final benchmark.
+
+Sebastian Martinez implemented and refined the rover dynamics model, the JAX-based SCP algorithm, and the supporting trajectory optimization tests.
+
+Both authors contributed to the paper writing and revision.
 
 \bibliography{sample}
 

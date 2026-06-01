@@ -36,6 +36,8 @@
 \newlabel{eq:ocp_corridor}{{16n}{3}{Optimal Control Problem}{equation.16n}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {III}Method}{3}{section.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {III.A}Terrain Model and Global Planning}{3}{subsection.3.1}\protected@file@percent }
+\citation{jax2018github}
+\citation{diamond2016cvxpy}
 \citation{malyuta2022scvx}
 \citation{duchi2018scp}
 \citation{malyuta2022scvx}
@@ -45,13 +47,24 @@
 \@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Trajectory benchmark settings.}}{5}{table.caption.1}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
 \newlabel{tab:settings}{{1}{5}{Trajectory benchmark settings}{table.caption.1}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {V}Results and Discussion}{5}{section.5}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Crater terrain validation. The elevation map is converted into slope, traversability, and risk layers. The traversability mask removes steep crater-wall and rim regions, while the continuous risk field discourages routes near hazardous terrain.}}{6}{figure.caption.2}\protected@file@percent }
 \newlabel{fig:terrain}{{1}{6}{Crater terrain validation. The elevation map is converted into slope, traversability, and risk layers. The traversability mask removes steep crater-wall and rim regions, while the continuous risk field discourages routes near hazardous terrain}{figure.caption.2}{}}
-\citation{nasa_lola,moon_sokolov}
+\@writefile{toc}{\contentsline {section}{\numberline {V}Results and Discussion}{6}{section.5}\protected@file@percent }
 \@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Effect of terrain-risk weight on global planner output.}}{7}{table.caption.3}\protected@file@percent }
 \newlabel{tab:risk_weight_sweep}{{2}{7}{Effect of terrain-risk weight on global planner output}{table.caption.3}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {VI}Conclusion}{7}{section.6}\protected@file@percent }
+\newlabel{fig:trajectory}{{2a}{8}{Planner path and trajectory}{figure.caption.4}{}}
+\newlabel{sub@fig:trajectory}{{a}{8}{Planner path and trajectory}{figure.caption.4}{}}
+\newlabel{fig:battery}{{2b}{8}{Battery energy}{figure.caption.4}{}}
+\newlabel{sub@fig:battery}{{b}{8}{Battery energy}{figure.caption.4}{}}
+\newlabel{fig:speed}{{2c}{8}{Rover speed}{figure.caption.4}{}}
+\newlabel{sub@fig:speed}{{c}{8}{Rover speed}{figure.caption.4}{}}
+\newlabel{fig:power}{{2d}{8}{Power consumption}{figure.caption.4}{}}
+\newlabel{sub@fig:power}{{d}{8}{Power consumption}{figure.caption.4}{}}
+\newlabel{fig:heading}{{2e}{8}{Commanded heading}{figure.caption.4}{}}
+\newlabel{sub@fig:heading}{{e}{8}{Commanded heading}{figure.caption.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Results for the full lunar-rover benchmark.}}{8}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:main_results}{{2}{8}{Results for the full lunar-rover benchmark}{figure.caption.4}{}}
+\citation{nasa_lola,moon_sokolov}
 \bibdata{sample}
 \bibcite{nasa_moon_to_mars_architecture}{{1}{2026}{{NASA}}{{}}}
 \bibcite{nasa_ltv}{{2}{2025}{{NASA}}{{}}}
@@ -63,21 +76,12 @@
 \bibcite{li2022terramechanics}{{8}{2022}{{Li and Bingham}}{{}}}
 \bibcite{smith2010lola}{{9}{2010}{{Smith et~al.}}{{Smith, Zuber, Jackson, Cavanaugh, Neumann, Riris, Sun, Zellar, Coltharp, Connelly, Katz, Kleyner, Liiva, Matuszeski, Mazarico, McGarry, Novo-Gradac, Ott, Peters, Ramos-Izquierdo, Ramsey, Rowlands, Schmidt, Scott, Shaw, Smith, Swinski, Torrence, Unger, Yu, and Zagwodzki}}}
 \bibcite{usgs_lola_dem_118m}{{10}{2014}{{USGS Astrogeology Science Center}}{{}}}
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Conclusion}{9}{section.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Contributions}{9}{section.7}\protected@file@percent }
 \bibcite{hart1968astar}{{11}{1968}{{Hart et~al.}}{{Hart, Nilsson, and Raphael}}}
-\bibcite{duchi2018scp}{{12}{2018}{{Duchi}}{{}}}
-\bibcite{nasa_lola}{{13}{2024}{{NASA Science}}{{}}}
-\bibcite{moon_sokolov}{{14}{2024}{{Sokolov}}{{}}}
-\@writefile{toc}{\contentsline {section}{\numberline {VII}Contributions}{8}{section.7}\protected@file@percent }
-\newlabel{fig:trajectory}{{2a}{9}{Planner path and trajectory}{figure.caption.4}{}}
-\newlabel{sub@fig:trajectory}{{a}{9}{Planner path and trajectory}{figure.caption.4}{}}
-\newlabel{fig:battery}{{2b}{9}{Battery energy}{figure.caption.4}{}}
-\newlabel{sub@fig:battery}{{b}{9}{Battery energy}{figure.caption.4}{}}
-\newlabel{fig:speed}{{2c}{9}{Rover speed}{figure.caption.4}{}}
-\newlabel{sub@fig:speed}{{c}{9}{Rover speed}{figure.caption.4}{}}
-\newlabel{fig:power}{{2d}{9}{Power consumption}{figure.caption.4}{}}
-\newlabel{sub@fig:power}{{d}{9}{Power consumption}{figure.caption.4}{}}
-\newlabel{fig:heading}{{2e}{9}{Commanded heading}{figure.caption.4}{}}
-\newlabel{sub@fig:heading}{{e}{9}{Commanded heading}{figure.caption.4}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Results for the full lunar-rover benchmark.}}{9}{figure.caption.4}\protected@file@percent }
-\newlabel{fig:main_results}{{2}{9}{Results for the full lunar-rover benchmark}{figure.caption.4}{}}
-\gdef \@abspage@last{9}
+\bibcite{jax2018github}{{12}{2018}{{Bradbury et~al.}}{{Bradbury, Frostig, Hawkins, Johnson, Katariya, Leary, Maclaurin, Necula, Paszke, Vander{P}las, Wanderman-{M}ilne, and Zhang}}}
+\bibcite{diamond2016cvxpy}{{13}{2016}{{Diamond and Boyd}}{{}}}
+\bibcite{duchi2018scp}{{14}{2018}{{Duchi}}{{}}}
+\bibcite{nasa_lola}{{15}{2024}{{NASA Science}}{{}}}
+\bibcite{moon_sokolov}{{16}{2024}{{Sokolov}}{{}}}
+\gdef \@abspage@last{10}
