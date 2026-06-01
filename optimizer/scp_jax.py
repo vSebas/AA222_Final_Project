@@ -37,6 +37,7 @@ class SCP:
 
     high_level_path: list = field(default_factory=list)
     history: list = field(default_factory=list)
+    corridor_radius_m: float = 1500.0
 
     beta_grow: float = 1.1
     beta_shrink: float = 0.5
@@ -74,20 +75,6 @@ class SCP:
     def horizon_steps(self):
         return self.N
 
-    # x0 = np.array([-1.0, -1.0, 0.0, 0.0])  # initial state
-    # x_goal = np.array([1.0, 1.0, 0.0, 0.0])  # desired final state
-    # P = 1e2 * np.eye(n_state)  # terminal state cost matrix
-    # Q = 1e1 * np.eye(n_state)  # state cost matrix
-    # R = 1e-2 * np.eye(m_control)  # control cost matrix
-    # # Set obstacle center points and radii
-    # centers = np.array(
-    #     [
-    #         [-0.6, -0.4],
-    #         [0.6, 0.1],
-    #     ]
-    # )
-    # radii = np.array([0.5, 0.5])
-
     def affinize(self, f, x_bar, u_bar):
         """
         Affinize the function `f(s, u)` around `(x_bar, u_bar)`.
@@ -103,11 +90,32 @@ class SCP:
         A, B, c = jax.vmap(one_step)(x_bar, u_bar)
         return np.array(A), np.array(B), np.array(c)
 
+    def path_positions(self, n_points: int) -> np.ndarray | None:
+        """Interpolate the stored high-level path to ``n_points`` samples."""
+
+        pts = np.asarray(self.high_level_path, dtype=float)
+        if pts.size == 0:
+            return None
+        if pts.ndim != 2 or pts.shape[1] < 2:
+            raise ValueError("high_level_path must contain XY waypoints")
+        if len(pts) == 1:
+            return np.repeat(pts[:1, :2], n_points, axis=0)
+
+        seg = np.linalg.norm(np.diff(pts[:, :2], axis=0), axis=1)
+        s = np.concatenate(([0.0], np.cumsum(seg)))
+        if s[-1] <= 0.0:
+            return np.repeat(pts[:1, :2], n_points, axis=0)
+        s_eval = np.linspace(0.0, s[-1], n_points)
+        x = np.interp(s_eval, s, pts[:, 0])
+        y = np.interp(s_eval, s, pts[:, 1])
+        return np.column_stack((x, y))
+
     def scp_iteration(self, x0, x_goal, x_prev, u_prev):
         """Solve a single SCP sub-problem for trajectory optimization."""
 
         Af, Bf, cf = self.affinize(lambda x, u: self.model.jax_F(x, u), x_prev[:-1], u_prev)
         Ap, Bp, pc = self.affinize(lambda x, u: self.model.jax_P(x, u), x_prev[:-1], u_prev)
+        path_xy = self.path_positions(self.N + 1)
 
         x_opt = cvx.Variable((self.N + 1, self.n_state))    # X, Y, E, speed, heading, omega
         u_opt = cvx.Variable((self.N, self.m_control))      # speed, heading
@@ -126,7 +134,8 @@ class SCP:
 
             constraints += [
                             x_opt[t + 1,:] == Af[t] @ x_opt[t,:] + Bf[t] @ u_opt[t,:] + cf[t] + nu_opt[t,:],
-                            # P_k \in C_k     # corridor, from high-level path
+                            cvx.norm_inf(x_opt[t, :2] - path_xy[t]) <= self.corridor_radius_m,
+                            cvx.norm_inf(x_opt[t + 1, :2] - path_xy[t + 1]) <= self.corridor_radius_m,
                             u_opt[t,0] >= 0,
                             u_opt[t,0] <= self.v_max,
                             # accel constraints

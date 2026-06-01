@@ -22,6 +22,22 @@ def path_length(points: np.ndarray) -> float:
         return 0.0
     return float(np.sum(np.linalg.norm(np.diff(points[:, :2], axis=0), axis=1)))
 
+
+def resample_path(points: np.ndarray, n_samples: int) -> np.ndarray:
+    points = np.asarray(points, dtype=float)
+    if len(points) == 0:
+        return np.zeros((0, 2), dtype=float)
+    if len(points) == 1:
+        return np.repeat(points[:, :2], n_samples, axis=0)
+    seg = np.linalg.norm(np.diff(points[:, :2], axis=0), axis=1)
+    s = np.concatenate(([0.0], np.cumsum(seg)))
+    if s[-1] <= 0.0:
+        return np.repeat(points[:1, :2], n_samples, axis=0)
+    s_eval = np.linspace(0.0, s[-1], n_samples)
+    x = np.interp(s_eval, s, points[:, 0])
+    y = np.interp(s_eval, s, points[:, 1])
+    return np.column_stack((x, y))
+
 def build_planner_path(n_waypoints: int = 40):
     return build_planner_solution(
         start_req=(-13_000.0, 0.0),
@@ -150,17 +166,21 @@ def main() -> None:
     x_goal = np.array([high_level_path[-1, 0], high_level_path[-1, 1], scp.model.min_battery_charge_j, 0.0, 0.0, 0.0], dtype=float)
     x_init = np.zeros((scp.N + 1, scp.n_state), dtype=float)
     u_init = np.zeros((scp.N, scp.m_control), dtype=float)
-    for k in range(scp.N + 1):
-        alpha = k / scp.N
-        x_init[k] = (1.0 - alpha) * x0 + alpha * x_goal
-    delta = x_goal[:2] - x0[:2]
-    heading = float(np.arctan2(delta[1], delta[0])) if np.linalg.norm(delta) > 0.0 else 0.0
-    speed = min(scp.v_max, np.linalg.norm(delta) / max(scp.N * scp.dt, 1.0))
+    path_xy = resample_path(high_level_path, scp.N + 1)
+    path_delta = np.diff(path_xy, axis=0)
+    path_dist = np.linalg.norm(path_delta, axis=1)
+    path_heading = np.unwrap(np.arctan2(path_delta[:, 1], path_delta[:, 0]))
+    path_speed = np.clip(path_dist / max(scp.dt, 1.0e-6), 0.0, scp.v_max)
+    x_init[:, :2] = path_xy
+    x_init[:, 2] = np.linspace(x0[2], x_goal[2], scp.N + 1)
+    x_init[:-1, 3] = path_speed
+    x_init[:-1, 4] = path_heading
+    x_init[:-1, 5] = np.concatenate(([0.0], np.diff(path_heading) / max(scp.dt, 1.0e-6)))
+    x_init[-1, 3] = x_init[-2, 3]
+    x_init[-1, 4] = x_init[-2, 4]
+    x_init[-1, 5] = x_init[-2, 5]
     for k in range(scp.N):
-        u_init[k] = [speed, heading]
-        x_init[k, 3] = speed
-        x_init[k, 4] = heading
-        x_init[k, 5] = 0.0
+        u_init[k] = [path_speed[min(k, len(path_speed) - 1)], path_heading[min(k, len(path_heading) - 1)]]
     x_star, u_star = scp.solve_scp(x0, x_goal, scp.N, scp.eps, x_init=x_init, u_init=u_init)
 
     plot_results(terrain, raw_path, high_level_path, scp, x_init, u_init, x_star, u_star, OUTPUT_PATH)
