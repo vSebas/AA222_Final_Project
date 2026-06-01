@@ -108,10 +108,11 @@ def main():
     scp = SCP(dt=1.0)# final_time_s=1000.0)
 
     start = np.array([0.0, 0.0, scp.model.battery_charge_j, 0.0, 0.0, 0.0], dtype=float)
-    goal = np.array([500.0, 500.0, 0.0, 0.0, 0.0, 0.0], dtype=float)
+    goal_position = np.array([500.0, 500.0], dtype=float)
+    goal = np.array([goal_position[0], goal_position[1], 0.0, 0.0, 0.0, 0.0], dtype=float)
     x_init, u_init = build_initial_guess(scp, start, goal)
 
-    x_star, u_star = scp.solve_scp(start, goal, scp.N, scp.eps, x_init=x_init, u_init=u_init)
+    x_star, u_star = scp.solve_scp(start, goal_position, scp.N, scp.eps, x_init=x_init, u_init=u_init)
 
     print(f"x_star shape: {x_star.shape}")
     print(f"u_star shape: {u_star.shape}")

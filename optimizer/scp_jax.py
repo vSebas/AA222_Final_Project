@@ -1,4 +1,3 @@
-from functools import partial
 from dataclasses import dataclass, field
 from pathlib import Path
 import os
@@ -25,19 +24,25 @@ class SCP:
     N: int = 100         # MPC horizon
     N_scp: int = 25      # maximum number of SCP iterations
     final_time_s: float = 0.0
+    # Preserved for a later variable-final-time version:
+    # dt_min_factor: float = 0.5
+    # dt_max_factor: float = 2.0
 
     model: RoverModel = field(init=False)
 
-    ct: float = 0.0
+    # ct: float = 0.0
     ce: float = 1.0
     c_nu: float = 1.0e4
 
-    rho_x: float = 10.0
+    rho_state: np.ndarray = field(default_factory=lambda: np.array([20.0, 20.0, 2000.0, 0.2, 0.3, 0.1]))
     rho_u: float = 1.0
 
     high_level_path: list = field(default_factory=list)
     history: list = field(default_factory=list)
-    corridor_radius_m: float = 1.0
+    corridor_radius_m: float = 100.0
+    a_max: float = 0.05
+    omega_max: float = 0.20
+    omega_dot_max: float = 0.05
 
     beta_grow: float = 1.1
     beta_shrink: float = 0.5
@@ -45,6 +50,8 @@ class SCP:
     eps_nu: float = 1.0e-4
     eps_x: float = 1.0e-3
     eps_J: float = 1.0e-3
+    defect_weight: float = 1.0e4
+    virtual_weight: float = 1.0e4
 
     max_power_consumption_w: float = 200.0
 
@@ -90,6 +97,21 @@ class SCP:
         A, B, c = jax.vmap(one_step)(x_bar, u_bar)
         return np.array(A), np.array(B), np.array(c)
 
+    # Preserved for a later variable-final-time version:
+    # def affinize_with_dt(self, f, x_bar, u_bar, dt_bar):
+    #     """Linearize a stage function with respect to state, control, and dt."""
+    #
+    #     x_bar = np.asarray(x_bar)
+    #     u_bar = np.asarray(u_bar)
+    #
+    #     def one_step(x, u):
+    #         A, B, D = jax.jacobian(f, argnums=(0, 1, 2))(x, u, dt_bar)
+    #         c = f(x, u, dt_bar) - A @ x - B @ u - D * dt_bar
+    #         return A, B, D, c
+    #
+    #     A, B, D, c = jax.vmap(one_step)(x_bar, u_bar)
+    #     return np.array(A), np.array(B), np.array(D), np.array(c)
+
     def path_positions(self, n_points: int) -> np.ndarray | None:
         """Interpolate the stored high-level path to ``n_points`` samples."""
 
@@ -113,7 +135,25 @@ class SCP:
         y = np.interp(s_eval, s, pts[:, 1])
         return np.column_stack((x, y))
 
-    def scp_iteration(self, x0, x_goal, x_prev, u_prev):
+    def nonlinear_objective(self, x: np.ndarray, u: np.ndarray) -> float:
+        energy = sum(self.model.P(x[k], u[k]) * self.dt for k in range(u.shape[0]))
+        # return float(self.ce * energy + self.ct * self.final_time_s)
+        return float(self.ce * energy)
+
+    def nonlinear_dynamics_defect(self, x: np.ndarray, u: np.ndarray) -> float:
+        defects = [x[k + 1] - self.model.F(x[k], u[k]) for k in range(u.shape[0])]
+        if not defects:
+            return 0.0
+        return float(np.max(np.linalg.norm(defects, ord=np.inf, axis=1)))
+
+    def merit(self, x: np.ndarray, u: np.ndarray, nu: np.ndarray | None = None) -> tuple[float, float, float, float]:
+        objective = self.nonlinear_objective(x, u)
+        defect = self.nonlinear_dynamics_defect(x, u)
+        virtual = 0.0 if nu is None else float(np.max(np.abs(nu)))
+        merit_value = objective + self.defect_weight * defect + self.virtual_weight * virtual
+        return merit_value, objective, defect, virtual
+
+    def scp_iteration(self, x0, goal_position, x_prev, u_prev, terminal_stop: bool = True):
         """Solve a single SCP sub-problem for trajectory optimization."""
 
         Af, Bf, cf = self.affinize(lambda x, u: self.model.jax_F(x, u), x_prev[:-1], u_prev)
@@ -124,11 +164,24 @@ class SCP:
         u_opt = cvx.Variable((self.N, self.m_control))      # speed, heading
         nu_opt = cvx.Variable((self.N, self.n_state))       # virtual dynamics control
 
+        # objective = self.ct * self.final_time_s
         objective = 0.0
-        constraints = [ x_opt[0,:] == x0,
-                        x_opt[self.N,:] == x_goal ]
-        objective = self.ct * self.final_time_s
-
+        constraints = [
+            x_opt[0, :] == x0,
+            x_opt[self.N, :2] == np.asarray(goal_position, dtype=float),
+        ]
+        if terminal_stop:
+            constraints += [
+                x_opt[self.N, 3] == 0.0,
+                x_opt[self.N, 5] == 0.0,
+            ]
+        # Preserved for a later variable-final-time version:
+        # dt_opt = cvx.Variable(nonneg=True)
+        # objective = self.ct * self.N * dt_opt
+        # constraints += [
+        #     dt_opt >= self.dt_min_factor * dt_prev,
+        #     dt_opt <= self.dt_max_factor * dt_prev,
+        # ]
         for t in range(self.N):
             Power_cons = Ap[t] @ x_opt[t,:] + Bp[t] @ u_opt[t,:] + pc[t]
 
@@ -141,18 +194,26 @@ class SCP:
                             # Corridor
                             cvx.norm_inf(x_opt[t, :2] - path_xy[t]) <= self.corridor_radius_m,
                             cvx.norm_inf(x_opt[t + 1, :2] - path_xy[t + 1]) <= self.corridor_radius_m,
+                            # Control constraints
                             u_opt[t,0] >= 0,
                             u_opt[t,0] <= self.v_max,
-                            # accel constraints missing
+                            # State rates constraints
+                            cvx.abs((u_opt[t, 0] - x_opt[t, 3]) / self.dt) <= self.a_max,
+                            cvx.abs((u_opt[t, 1] - x_opt[t, 4]) / self.dt) <= self.omega_max,
+                            cvx.abs(((u_opt[t, 1] - x_opt[t, 4]) / self.dt - x_opt[t, 5]) / self.dt) <= self.omega_dot_max,
+                            # Power constraints
                             x_opt[t,2] >= self.E_min,
                             x_opt[t,2] <= self.E_max,
                             x_opt[t + 1,2] >= self.E_min,
                             x_opt[t + 1,2] <= self.E_max,
+                            Power_cons >= 0,
                             Power_cons <= self.P_cons_max,
-
-                            cvx.norm_inf(x_opt[t,:] - x_prev[t,:]) <= self.rho_x,
+                            
+                            cvx.abs(x_opt[t,:] - x_prev[t,:]) <= self.rho_state,
                             cvx.norm_inf(u_opt[t,:] - u_prev[t,:]) <= self.rho_u,
                             ]
+                            # Preserved for a later variable-final-time version:
+                            # cvx.abs(dt_opt - dt_prev) <= rho_dt
 
         prob = cvx.Problem(cvx.Minimize(objective), constraints)
         prob.solve()
@@ -166,8 +227,7 @@ class SCP:
         
         return x_opt.value, u_opt.value, nu_opt.value, prob.objective.value
 
-    def solve_scp(self,x0,x_goal,N,eps,
-                                     x_init=None,u_init=None,convergence_error=False):
+    def solve_scp(self,x0,goal_position,N,eps,x_init=None,u_init=None,convergence_error=False,terminal_stop: bool = True):
         """Solve the obstacle avoidance problem via SCP."""
 
         # Initialize trajectory
@@ -181,37 +241,62 @@ class SCP:
             x_bar = np.copy(x_init)
             u_bar = np.copy(u_init)
 
-        # Do SCP until convergence or maximum number of iterations is reached
         converged = False
-        J_bar = np.zeros(self.N_scp + 1)
-        J_bar[0] = np.inf
+        merit_bar, objective_bar, defect_bar, virtual_bar = self.merit(x_bar, u_bar)
 
         for i in range(self.N_scp):
-            x_bar, u_bar, nu_bar, J_bar[i + 1] = self.scp_iteration(x0, x_goal, x_bar, u_bar)
-            dJ_bar = np.abs(J_bar[i + 1] - J_bar[i])
+            x_old = x_bar.copy()
+            u_old = u_bar.copy()
+            x_new, u_new, nu_new, convex_objective = self.scp_iteration(
+                x0,
+                goal_position,
+                x_bar,
+                u_bar,
+                terminal_stop=terminal_stop,
+            )
+            merit_new, objective_new, defect_new, virtual_new = self.merit(x_new, u_new, nu_new)
+            accepted = merit_new <= merit_bar + self.eps_J
+
+            if accepted:
+                x_bar = x_new
+                u_bar = u_new
+                d_merit = abs(merit_bar - merit_new)
+                merit_bar = merit_new
+                objective_bar = objective_new
+                defect_bar = defect_new
+                virtual_bar = virtual_new
+                self.rho_state *= self.beta_grow
+                self.rho_u *= self.beta_grow
+            else:
+                d_merit = abs(merit_new - merit_bar)
+                x_bar = x_old
+                u_bar = u_old
+                self.rho_state *= self.beta_shrink
+                self.rho_u *= self.beta_shrink
+
             self.history.append(
                 {
                     "iteration": i,
-                    "objective": float(J_bar[i + 1]),
-                    "delta_objective": float(dJ_bar),
+                    "accepted": bool(accepted),
+                    "convex_objective": float(convex_objective),
+                    "objective": float(objective_bar),
+                    "candidate_objective": float(objective_new),
+                    "merit": float(merit_bar),
+                    "candidate_merit": float(merit_new),
+                    "delta_merit": float(d_merit),
+                    "defect": float(defect_bar),
+                    "candidate_defect": float(defect_new),
+                    "virtual": float(virtual_bar),
+                    "candidate_virtual": float(virtual_new),
+                    "final_time_s": float(self.final_time_s),
+                    "rho_state_max": float(np.max(self.rho_state)),
+                    "rho_u": float(self.rho_u),
                 }
             )
 
-            # defect_dyn = self.nonlinear_dynamics_defect(x_bar, u_bar)
-            # virtual_norm = float(np.max(np.abs(nu_bar)))
-            # state_change = float(np.max(np.abs(x_bar - x_bar)))
-            # control_change = float(np.max(np.abs(u_bar - u_bar)))
-            # J_bar = self.nonlinear_objective(x_bar, u_bar)
-            # cost_change = abs(J_bar - J_bar)
-
-            # accepted = defect_dyn <= self.eps_dyn and J_candidate <= J_bar + self.eps_J
-            
-            if dJ_bar < eps:
+            if accepted and d_merit < self.eps_J and defect_bar < self.eps_dyn and virtual_bar < self.eps_nu:
                 converged = True
                 break
-            else:
-                self.rho_x *= self.beta_shrink
-                self.rho_u *= self.beta_shrink
 
         if not converged and convergence_error:
             raise RuntimeError("SCP did not converge!")

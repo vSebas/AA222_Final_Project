@@ -35,7 +35,7 @@ class RoverModel:
     inertia_z: float = 7.111679166666666
     gravity: float = 1.62
     c0: float = 63.54416662174218
-    # max_speed_mps: float = 0.45
+    max_speed_mps: float = 0.45
 
     # Power Params
     p_base: float = 100.0                       #   Required to maintain baseline onboard systems   (from paper)
@@ -191,7 +191,7 @@ class RoverModel:
 
     ##--------------------------------------------------------------------------------------##
     # Dynamics
-    def P(self, x: ArrayLike, u: ArrayLike) -> float:
+    def P(self, x: ArrayLike, u: ArrayLike, dt: float | None = None) -> float:
         """Stateless power consumption for SCP.
 
         Parameters
@@ -211,15 +211,16 @@ class RoverModel:
         if x.shape[-1] < 6:
             raise ValueError("SCP state must be [X, Y, E, speed, heading, omega]")
 
+        dt = self.dt if dt is None else dt
         speed_prev = x[3]
         heading_prev = x[4]
         omega_prev = x[5]
         speed_cmd = u[0]
         heading_cmd = u[1]
 
-        accel_cmd = (speed_cmd - speed_prev) / self.dt
-        omega_cmd = (heading_cmd - heading_prev) / self.dt
-        omega_dot_cmd = (omega_cmd - omega_prev) / self.dt
+        accel_cmd = (speed_cmd - speed_prev) / dt
+        omega_cmd = (heading_cmd - heading_prev) / dt
+        omega_dot_cmd = (omega_cmd - omega_prev) / dt
 
         x_dot = speed_cmd * np.cos(heading_cmd)
         y_dot = speed_cmd * np.sin(heading_cmd)
@@ -237,7 +238,7 @@ class RoverModel:
         )
         return float(breakdown["power_consumption_w"])
 
-    def jax_P(self, x: ArrayLike, u: ArrayLike):
+    def jax_P(self, x: ArrayLike, u: ArrayLike, dt: ArrayLike | None = None):
         """JAX-friendly stateless power consumption for SCP."""
 
         x = jnp.asarray(x, dtype=float)
@@ -245,15 +246,16 @@ class RoverModel:
         if x.shape[-1] < 6:
             raise ValueError("SCP state must be [X, Y, E, speed, heading, omega]")
 
+        dt = self.dt if dt is None else dt
         speed_prev = x[..., 3]
         heading_prev = x[..., 4]
         omega_prev = x[..., 5]
         speed_cmd = u[..., 0]
         heading_cmd = u[..., 1]
 
-        accel_cmd = (speed_cmd - speed_prev) / self.dt
-        omega_cmd = (heading_cmd - heading_prev) / self.dt
-        omega_dot_cmd = (omega_cmd - omega_prev) / self.dt
+        accel_cmd = (speed_cmd - speed_prev) / dt
+        omega_cmd = (heading_cmd - heading_prev) / dt
+        omega_dot_cmd = (omega_cmd - omega_prev) / dt
 
         x_dot = speed_cmd * jnp.cos(heading_cmd)
         y_dot = speed_cmd * jnp.sin(heading_cmd)
@@ -272,7 +274,7 @@ class RoverModel:
         p_res = self.c0 * jnp.abs(v_body)
         return p_linear + p_rot + p_res + self.p_base
 
-    def F(self, x: ArrayLike, u: ArrayLike) -> np.ndarray:
+    def F(self, x: ArrayLike, u: ArrayLike, dt: float | None = None) -> np.ndarray:
         """Stateless discrete dynamics for SCP.
 
         Uses state ``x = [X, Y, E, speed, heading, omega]`` and control
@@ -290,17 +292,20 @@ class RoverModel:
         if x.shape[-1] < 6:
             raise ValueError("SCP state must be [X, Y, E, speed, heading, omega]")
 
+        dt = self.dt if dt is None else dt
         heading_prev = x[4]
         speed_cmd = u[0]
         heading_cmd = u[1]
-        omega_cmd = (heading_cmd - heading_prev) / self.dt
-        power_consumption_w = self.P(x, u, self.dt)
+        omega_cmd = (heading_cmd - heading_prev) / dt
+        power_consumption_w = self.P(x, u, dt)
         battery_discharge_rate_j_per_s = max(power_consumption_w - self.power_generation_w, 0.0)
         return np.array(
             [
-                x[0] + self.dt * speed_cmd * np.cos(heading_cmd),
-                x[1] + self.dt * speed_cmd * np.sin(heading_cmd),
-                max(x[2] - self.dt * battery_discharge_rate_j_per_s, 0.0),
+                x[0] + dt * speed_cmd * np.cos(heading_cmd),
+                x[1] + dt * speed_cmd * np.sin(heading_cmd),
+                # TODO: remove this clipping once SCP reliably enforces
+                # E_min <= E_k <= E_max; clipping can hide energy infeasibility.
+                max(x[2] - dt * battery_discharge_rate_j_per_s, 0.0),
                 speed_cmd,
                 heading_cmd,
                 omega_cmd,
@@ -308,7 +313,7 @@ class RoverModel:
             dtype=float,
         )
 
-    def jax_F(self, x: ArrayLike, u: ArrayLike):
+    def jax_F(self, x: ArrayLike, u: ArrayLike, dt: ArrayLike | None = None):
         """JAX-friendly stateless discrete dynamics for SCP."""
 
         x = jnp.asarray(x, dtype=float)
@@ -316,17 +321,20 @@ class RoverModel:
         if x.shape[-1] < 6:
             raise ValueError("SCP state must be [X, Y, E, speed, heading, omega]")
 
+        dt = self.dt if dt is None else dt
         heading_prev = x[..., 4]
         speed_cmd = u[..., 0]
         heading_cmd = u[..., 1]
-        omega_cmd = (heading_cmd - heading_prev) / self.dt
-        power_consumption_w = self.jax_P(x, u)
+        omega_cmd = (heading_cmd - heading_prev) / dt
+        power_consumption_w = self.jax_P(x, u, dt)
         battery_discharge_rate_j_per_s = jnp.maximum(power_consumption_w - self.power_generation_w, 0.0)
         return jnp.stack(
             (
-                x[..., 0] + self.dt * speed_cmd * jnp.cos(heading_cmd),
-                x[..., 1] + self.dt * speed_cmd * jnp.sin(heading_cmd),
-                jnp.maximum(x[..., 2] - self.dt * battery_discharge_rate_j_per_s, 0.0),
+                x[..., 0] + dt * speed_cmd * jnp.cos(heading_cmd),
+                x[..., 1] + dt * speed_cmd * jnp.sin(heading_cmd),
+                # TODO: remove this clipping once SCP reliably enforces
+                # E_min <= E_k <= E_max; clipping can hide energy infeasibility.
+                jnp.maximum(x[..., 2] - dt * battery_discharge_rate_j_per_s, 0.0),
                 speed_cmd,
                 heading_cmd,
                 omega_cmd,
