@@ -26,12 +26,7 @@ class SCP:
     N_scp: int = 25      # maximum number of SCP iterations
     final_time_s: float = 0.0
 
-    model: RoverModel = field(
-        default_factory=lambda: RoverModel(
-            battery_charge_j=20_000.0,
-            power_generation_w=65.0,
-        )
-    )
+    model: RoverModel = field(init=False)
 
     ct: float = 0.0
     ce: float = 1.0
@@ -50,7 +45,13 @@ class SCP:
     eps_x: float = 1.0e-3
     eps_J: float = 1.0e-3
 
+    max_power_consumption_w: float = 200.0
+
     def __post_init__(self) -> None:
+        self.model = RoverModel(
+            dt=self.dt,
+            battery_charge_j=20_000.0,
+        )
         self.final_time_s = self.N * self.dt
 
     @property
@@ -67,7 +68,7 @@ class SCP:
 
     @property
     def P_cons_max(self):
-        return self.model.max_power_consumption_w
+        return self.max_power_consumption_w
 
     @property
     def horizon_steps(self):
@@ -102,30 +103,20 @@ class SCP:
         A, B, c = jax.vmap(one_step)(x_bar, u_bar)
         return np.array(A), np.array(B), np.array(c)
 
-    # def nonlinear_dynamics_defect(self, x, u):
-    #     """Maximum one-step mismatch against the true nonlinear dynamics."""
-
-    #     x = np.asarray(x, dtype=float)
-    #     u = np.asarray(u, dtype=float)
-    #     defects = []
-    #     for k in range(u.shape[1]):
-    #         defects.append(x[:, k + 1] - self.model.F(x[:, k], u[:, k], self.dt))
-    #     return 0.0 if not defects else float(np.max(np.linalg.norm(defects, ord=np.inf, axis=1)))
-
-
     def scp_iteration(self, x0, x_goal, x_prev, u_prev):
         """Solve a single SCP sub-problem for trajectory optimization."""
 
-        Af, Bf, cf = self.affinize(lambda x, u: self.model.jax_F(x, u, self.dt), x_prev[:-1], u_prev)
-        Ap, Bp, pc = self.affinize(lambda x, u: self.model.jax_P(x, u, self.dt), x_prev[:-1], u_prev)
+        Af, Bf, cf = self.affinize(lambda x, u: self.model.jax_F(x, u), x_prev[:-1], u_prev)
+        Ap, Bp, pc = self.affinize(lambda x, u: self.model.jax_P(x, u), x_prev[:-1], u_prev)
 
         x_opt = cvx.Variable((self.N + 1, self.n_state))    # X, Y, E, speed, heading, omega
         u_opt = cvx.Variable((self.N, self.m_control))      # speed, heading
         nu_opt = cvx.Variable((self.N, self.n_state))       # virtual dynamics control
 
+        objective = 0.0
         constraints = [ x_opt[0,:] == x0,
                         x_opt[self.N,:] == x_goal ]
-        objective = self.ct * self.final_time_s
+        # objective = self.ct * self.final_time_s
 
         for t in range(self.N):
             Power_cons = Ap[t] @ x_opt[t,:] + Bp[t] @ u_opt[t,:] + pc[t]

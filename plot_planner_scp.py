@@ -48,7 +48,7 @@ def build_scp_from_path(path_points, max_horizon_steps: int = 100) -> SCP:
     )
 
 def power_trace(scp: SCP, x: np.ndarray, u: np.ndarray) -> np.ndarray:
-    return np.array([scp.model.P(x[k], u[k], scp.dt) for k in range(u.shape[0])], dtype=float)
+    return np.array([scp.model.P(x[k], u[k]) for k in range(u.shape[0])], dtype=float)
 
 
 def plot_results(

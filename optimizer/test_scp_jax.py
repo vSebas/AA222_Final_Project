@@ -117,7 +117,7 @@ def main():
     print(f"u_star shape: {u_star.shape}")
     print(f"start: {x_star[0, :3]}")
     print(f"goal:  {x_star[-1, :3]}")
-    plot_solution(scp, x_star, u_star, Path("scp_solution.png"))
+    plot_solution(scp, x_star, u_star, Path("scp_solution2.png"))
 
 
 if __name__ == "__main__":

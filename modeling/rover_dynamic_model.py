@@ -27,29 +27,34 @@ class RoverModel:
 
     Grade is not included in C0; slope enters through ``m g sin(phi)``.
     """
+    dt: float = 0.1
+    time_s: float = 0.0
 
+    # Dynamic Model Params
     mass: float = 84.0
     inertia_z: float = 7.111679166666666
     gravity: float = 1.62
     c0: float = 63.54416662174218
-    p_base: float = 100.0
-    power_generation_w: float = 65.0
-    battery_charge_j: float = 20_000.0
+    max_speed_mps: float = 0.45
+
+    # Power Params
+    p_base: float = 100.0                       #   Required to maintain baseline onboard systems   (from paper)
+    power_generation_w: float = 100.0           #   J/s (from Google)
+    battery_charge_j: float = 0.0#20_000.0      #   Current battery charge  (user defined)
+    battery_discharge_rate_j_per_s: float = 0.0 #   Rate to update battery charge (linear discharge)
+    power_consumption_w: float = 0.0            #   lin + rot + ... power
     min_battery_charge_j: float = 0.0
     max_battery_charge_j: float | None = None
-    max_speed_mps: float = 0.45
-    max_power_consumption_w: float = 1_000.0
-    default_dt_s: float = 0.1
+
+    # State
     phi: ArrayLike = 0.0
     xi: ArrayLike = 0.0
     x_g: float = 0.0
     y_g: float = 0.0
     psi_g: float = 0.0
-    v_command_mps: float = 0.45
-    omega_command_radps: float = 0.18
-    time_s: float = 0.0
-    power_consumption_w: float = 0.0
-    battery_discharge_rate_j_per_s: float = 0.0
+
+    v_command_mps: float = 0.0 #0.45
+    omega_command_radps: float = 0.0 #0.18
 
     def __post_init__(self) -> None:
         if self.max_battery_charge_j is None:
@@ -123,14 +128,14 @@ class RoverModel:
         )
         return np.array([pose_dot[0], pose_dot[1], pose_dot[2], -battery_discharge_rate_j_per_s], dtype=float)
 
-    def _rk4(self, state: np.ndarray, dt: float) -> np.ndarray:
+    def _rk4(self, state: np.ndarray) -> np.ndarray:
         """Fourth-order Runge-Kutta integration for the model's augmented state."""
 
         k1 = self._dynamics(state)
-        k2 = self._dynamics(state + 0.5 * dt * k1)
-        k3 = self._dynamics(state + 0.5 * dt * k2)
-        k4 = self._dynamics(state + dt * k3)
-        return state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        k2 = self._dynamics(state + 0.5 * self.dt * k1)
+        k3 = self._dynamics(state + 0.5 * self.dt * k2)
+        k4 = self._dynamics(state + self.dt * k3)
+        return state + (self.dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
     ##--------------------------------------------------------------------------------------##
     # Transformations
@@ -186,7 +191,7 @@ class RoverModel:
 
     ##--------------------------------------------------------------------------------------##
     # Dynamics
-    def P(self, x: ArrayLike, u: ArrayLike, dt: float | None = None) -> float:
+    def P(self, x: ArrayLike, u: ArrayLike) -> float:
         """Stateless power consumption for SCP.
 
         Parameters
@@ -201,9 +206,6 @@ class RoverModel:
             Discretization interval. If omitted, ``default_dt_s`` is used.
         """
 
-        dt = self.default_dt_s if dt is None else float(dt)
-        if dt <= 0.0:
-            raise ValueError("dt must be positive")
         u = self._as_array(u)
         x = self._as_array(x)
         if x.shape[-1] < 6:
@@ -215,9 +217,9 @@ class RoverModel:
         speed_cmd = u[0]
         heading_cmd = u[1]
 
-        accel_cmd = (speed_cmd - speed_prev) / dt
-        omega_cmd = (heading_cmd - heading_prev) / dt
-        omega_dot_cmd = (omega_cmd - omega_prev) / dt
+        accel_cmd = (speed_cmd - speed_prev) / self.dt
+        omega_cmd = (heading_cmd - heading_prev) / self.dt
+        omega_dot_cmd = (omega_cmd - omega_prev) / self.dt
 
         x_dot = speed_cmd * np.cos(heading_cmd)
         y_dot = speed_cmd * np.sin(heading_cmd)
@@ -235,12 +237,9 @@ class RoverModel:
         )
         return float(breakdown["power_consumption_w"])
 
-    def jax_P(self, x: ArrayLike, u: ArrayLike, dt: float | None = None):
+    def jax_P(self, x: ArrayLike, u: ArrayLike):
         """JAX-friendly stateless power consumption for SCP."""
 
-        dt = self.default_dt_s if dt is None else float(dt)
-        if dt <= 0.0:
-            raise ValueError("dt must be positive")
         x = jnp.asarray(x, dtype=float)
         u = jnp.asarray(u, dtype=float)
         if x.shape[-1] < 6:
@@ -252,9 +251,9 @@ class RoverModel:
         speed_cmd = u[..., 0]
         heading_cmd = u[..., 1]
 
-        accel_cmd = (speed_cmd - speed_prev) / dt
-        omega_cmd = (heading_cmd - heading_prev) / dt
-        omega_dot_cmd = (omega_cmd - omega_prev) / dt
+        accel_cmd = (speed_cmd - speed_prev) / self.dt
+        omega_cmd = (heading_cmd - heading_prev) / self.dt
+        omega_dot_cmd = (omega_cmd - omega_prev) / self.dt
 
         x_dot = speed_cmd * jnp.cos(heading_cmd)
         y_dot = speed_cmd * jnp.sin(heading_cmd)
@@ -273,7 +272,7 @@ class RoverModel:
         p_res = self.c0 * jnp.abs(v_body)
         return p_linear + p_rot + p_res + self.p_base
 
-    def F(self, x: ArrayLike, u: ArrayLike, dt: float) -> np.ndarray:
+    def F(self, x: ArrayLike, u: ArrayLike) -> np.ndarray:
         """Stateless discrete dynamics for SCP.
 
         Uses state ``x = [X, Y, E, speed, heading, omega]`` and control
@@ -286,9 +285,6 @@ class RoverModel:
             heading+ = heading
             omega+ = (heading - previous_heading) / dt
         """
-
-        if dt <= 0.0:
-            raise ValueError("dt must be positive")
         x = self._as_array(x)
         u = self._as_array(u)
         if x.shape[-1] < 6:
@@ -297,14 +293,14 @@ class RoverModel:
         heading_prev = x[4]
         speed_cmd = u[0]
         heading_cmd = u[1]
-        omega_cmd = (heading_cmd - heading_prev) / dt
-        power_consumption_w = self.P(x, u, dt)
+        omega_cmd = (heading_cmd - heading_prev) / self.dt
+        power_consumption_w = self.P(x, u, self.dt)
         battery_discharge_rate_j_per_s = max(power_consumption_w - self.power_generation_w, 0.0)
         return np.array(
             [
-                x[0] + dt * speed_cmd * np.cos(heading_cmd),
-                x[1] + dt * speed_cmd * np.sin(heading_cmd),
-                max(x[2] - dt * battery_discharge_rate_j_per_s, 0.0),
+                x[0] + self.dt * speed_cmd * np.cos(heading_cmd),
+                x[1] + self.dt * speed_cmd * np.sin(heading_cmd),
+                max(x[2] - self.dt * battery_discharge_rate_j_per_s, 0.0),
                 speed_cmd,
                 heading_cmd,
                 omega_cmd,
@@ -312,11 +308,9 @@ class RoverModel:
             dtype=float,
         )
 
-    def jax_F(self, x: ArrayLike, u: ArrayLike, dt: float):
+    def jax_F(self, x: ArrayLike, u: ArrayLike):
         """JAX-friendly stateless discrete dynamics for SCP."""
 
-        if dt <= 0.0:
-            raise ValueError("dt must be positive")
         x = jnp.asarray(x, dtype=float)
         u = jnp.asarray(u, dtype=float)
         if x.shape[-1] < 6:
@@ -325,14 +319,14 @@ class RoverModel:
         heading_prev = x[..., 4]
         speed_cmd = u[..., 0]
         heading_cmd = u[..., 1]
-        omega_cmd = (heading_cmd - heading_prev) / dt
-        power_consumption_w = self.jax_P(x, u, dt)
+        omega_cmd = (heading_cmd - heading_prev) / self.dt
+        power_consumption_w = self.jax_P(x, u)
         battery_discharge_rate_j_per_s = jnp.maximum(power_consumption_w - self.power_generation_w, 0.0)
         return jnp.stack(
             (
-                x[..., 0] + dt * speed_cmd * jnp.cos(heading_cmd),
-                x[..., 1] + dt * speed_cmd * jnp.sin(heading_cmd),
-                jnp.maximum(x[..., 2] - dt * battery_discharge_rate_j_per_s, 0.0),
+                x[..., 0] + self.dt * speed_cmd * jnp.cos(heading_cmd),
+                x[..., 1] + self.dt * speed_cmd * jnp.sin(heading_cmd),
+                jnp.maximum(x[..., 2] - self.dt * battery_discharge_rate_j_per_s, 0.0),
                 speed_cmd,
                 heading_cmd,
                 omega_cmd,
@@ -423,7 +417,7 @@ class RoverModel:
             0.0,
         )
 
-    def step(self, dt: float) -> None:
+    def step(self) -> None:
         """Advance pose and battery by one committed RK4 timestep."""
 
         if self.battery_charge_j <= 0.0:
@@ -431,10 +425,10 @@ class RoverModel:
             self.update_power_metrics()
             return
 
-        next_state = self._rk4(self._state, dt)
+        next_state = self._rk4(self._state)
         self.x_g = float(next_state[0])
         self.y_g = float(next_state[1])
         self.psi_g = float(next_state[2])
         self.battery_charge_j = max(float(next_state[3]), 0.0)
-        self.time_s += dt
+        self.time_s += self.dt
         self.update_power_metrics()
