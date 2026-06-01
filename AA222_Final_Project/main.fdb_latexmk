@@ -1,14 +1,14 @@
 # Fdb version 4
-["bibtex main"] 1780350662.19565 "main.aux" "main.bbl" "main" 1780350665.61822 0
+["bibtex main"] 1780352956.42712 "main.aux" "main.bbl" "main" 1780353134.37362 0
   "./new-aiaa.bst" 1780212560 34008 a60a1aa8bda61b245dd8097a74e21b9a ""
   "./sample.bib" 1780350598.65287 5527 656a0a54606bf0b5ff1efae358d08063 ""
-  "main.aux" 1780350665.37432 7053 edae616b50e7f9da4a2b4146308738db "pdflatex"
+  "main.aux" 1780353134.17188 7451 7b0bfe1c2682161adbad6099168d6926 "pdflatex"
   (generated)
   "main.bbl"
   "main.blg"
   (rewritten before read)
-["pdflatex"] 1780350662.22855 "/run/media/saveas/Secondary-Storage/Masters/AA222/AA222_Final_Project/AA222_Final_Project/main.tex" "main.pdf" "main" 1780350665.61899 0
-  "/run/media/saveas/Secondary-Storage/Masters/AA222/AA222_Final_Project/AA222_Final_Project/main.tex" 1780350655.33243 26905 40859f22522665c1cc2e20aa9b7db794 ""
+["pdflatex"] 1780353131.15367 "/run/media/saveas/Secondary-Storage/Masters/AA222/AA222_Final_Project/AA222_Final_Project/main.tex" "main.pdf" "main" 1780353134.37435 0
+  "/run/media/saveas/Secondary-Storage/Masters/AA222/AA222_Final_Project/AA222_Final_Project/main.tex" 1780353130.88314 28336 943a909a81421d71416abeb1c6e22cdd ""
   "/usr/share/texmf-dist/fonts/enc/dvips/lm/lm-ec.enc" 1775415801 2375 baa924870cfb487815765f9094cf3728 ""
   "/usr/share/texmf-dist/fonts/enc/dvips/lm/lm-mathex.enc" 1775415801 3486 c7eadf5dcc57b3b2d11736679f6636ba ""
   "/usr/share/texmf-dist/fonts/enc/dvips/lm/lm-mathit.enc" 1775415801 2405 5dcf2c1b967ee25cc46c58cd52244aed ""
@@ -159,10 +159,10 @@
   "figures/speed_hours.png" 1780343078.84404 54660 7743d4a68d78fe6f9d0e5f3aeb16d729 ""
   "figures/terrain_validation.png" 1780339999.49095 746051 764e8397f41965cd88989e26582a0806 ""
   "figures/trajectory.png" 1780343078.84501 85374 0d55fe6020dda172adeea706fdb4a832 ""
-  "main.aux" 1780350665.37432 7053 edae616b50e7f9da4a2b4146308738db "pdflatex"
-  "main.bbl" 1780350662.22045 5624 a66efbee9a8cc98d8ba03026ff09e213 "bibtex main"
-  "main.out" 1780350665.37599 1737 530b0c04e0e5f396328e3c6a316e5b5f "pdflatex"
-  "main.tex" 1780350655.33243 26905 40859f22522665c1cc2e20aa9b7db794 ""
+  "main.aux" 1780353134.17188 7451 7b0bfe1c2682161adbad6099168d6926 "pdflatex"
+  "main.bbl" 1780353058.45285 5712 19dac26a31b8854ae2476d44d8ed637d "bibtex main"
+  "main.out" 1780353134.17323 1898 211a26b0095505c86ee7964529be5cf0 "pdflatex"
+  "main.tex" 1780353130.88314 28336 943a909a81421d71416abeb1c6e22cdd ""
   "new-aiaa.cls" 1780212560 2938 6495496c6ec29c9d8effcadfbb8e6731 ""
   "newtxmath.sty" 1780187921.55969 86 b6c8345e26d0db03480750bfd4b722f2 ""
   "newtxtext.sty" 1780187918.39281 111 a081ae5293aa025ec6f298caa7f430e4 ""

@@ -12,7 +12,7 @@
 \setlength\LTleft{0pt}
 \graphicspath{{figures/}{./}}
 
-\title{Time--Energy Trajectory Optimization for Lunar Rover Navigation}
+\title{Time-Energy Trajectory Optimization for Lunar Rover Navigation}
 
 \author{Martin Zhou and Sebastian Martinez}
 \affil{Stanford University, Stanford, CA}
@@ -69,7 +69,7 @@ The electrical power model converts commanded motion, terrain resistance, and ba
     P_k &= P(x_k,u_k,\Delta t)
         = P_{\mathrm{lin}} + P_{\mathrm{rot}} + P_{\mathrm{res}} + P_{\mathrm{base}}.
 \end{align}
-Here $m$ is rover mass, $I_z$ is yaw inertia, $g$ is lunar gravity, $\phi$ is the local slope angle, and $c_0$ is an aggregate terrain-resistance coefficient. The resistive term is a low-order surrogate for wheel--soil interaction losses. Detailed terramechanics models include compression, rolling, bulldozing, gravitational resistance, slip, sinkage, and shear effects~\cite{li2022terramechanics}; those effects are approximated here by $P_{\mathrm{res}}=c_0|v_B|$ to keep the trajectory optimization inexpensive.
+Here $m$ is rover mass, $I_z$ is yaw inertia, $g$ is lunar gravity, $\phi$ is the local slope angle, and $c_0$ is an aggregate terrain-resistance coefficient. The numerical values used for these rover-model parameters, power parameters, battery limits, and trajectory constraints are summarized in Appendix~\ref{tab:rover_params}. The resistive term is a low-order surrogate for wheel--soil interaction losses. Detailed terramechanics models include compression, rolling, bulldozing, gravitational resistance, slip, sinkage, and shear effects~\cite{li2022terramechanics}; those effects are approximated here by $P_{\mathrm{res}}=c_0|v_B|$ to keep the trajectory optimization inexpensive.
 
 The gross energy consumed over one stage is $P(x_k,u_k,\Delta t)\Delta t$. Battery discharge is computed after subtracting available generation:
 \begin{equation}
@@ -328,12 +328,46 @@ The benchmark result shows that the pipeline achieves the main navigation object
 The main limitations are the synthetic benchmark, simplified energy model, and prototype local optimizer. The terrain does not include polar shadowing or illumination variation, and the energy model does not explicitly capture active recharge, spatially varying solar incidence, slip, sinkage, or detailed wheel--soil interaction. Future work should add terrain-risk or terrain-resistance terms directly to the local trajectory objective, improve the energy model, and evaluate the pipeline on polar LOLA-derived terrain for lunar south-pole mission planning~\cite{nasa_lola,moon_sokolov}.
 
 \section{Contributions}
-Martin Zhou implemented the terrain pipeline, global planning stack, and the planner/SCP integration used in the final benchmark.
+Martin Zhou implemented the terrain pipeline, global planning stack, and devised initial planner/SCP pipeline.
 
-Sebastian Martinez implemented and refined the rover dynamics model, the JAX-based SCP algorithm, and the supporting trajectory optimization tests.
+Sebastian Martinez implemented the rover dynamics model, the JAX-based SCP algorithm, and trajectory optimization tests.
 
 Both authors contributed to the paper writing and revision.
 
 \bibliography{sample}
+
+\appendix
+\section{Rover Model Parameters}
+
+\begin{table}[h]
+\centering
+\caption{Rover model and trajectory-optimization parameters.}
+\label{tab:rover_params}
+\begin{tabular}{lll}
+\toprule
+Parameter & Value & Description \\
+\midrule
+$m$ & \SI{84.0}{kg} & Rover mass \\
+$I_z$ & \SI{7.11}{kg.m^2} & Yaw moment of inertia \\
+$g_\ell$ & \SI{1.62}{m/s^2} & Lunar gravity \\
+$c_0$ & \SI{63.54}{N} & Aggregate terrain-resistance coefficient \\
+$v_{\max}$ & \SI{0.45}{m/s} & Maximum commanded rover speed \\
+$P_{\mathrm{base}}$ & \SI{100}{W} & Baseline subsystem power load \\
+$P_{\mathrm{gen}}$ & \SI{100}{W} & Constant generation offset \\
+$P_{\max}$ & \SI{200}{W} & Maximum modeled power consumption \\
+$E_0$ & \SI{5.0}{MJ} & Initial battery energy \\
+$E_{\min}$ & \SI{0}{J} & Minimum battery energy \\
+$E_{\max}$ & \SI{5.0}{MJ} & Maximum battery energy \\
+$a_{\max}$ & \SI{0.05}{m/s^2} & Acceleration limit \\
+$\omega_{\max}$ & \SI{0.20}{rad/s} & Heading-rate limit \\
+$\dot{\omega}_{\max}$ & \SI{0.05}{rad/s^2} & Yaw-acceleration limit \\
+$r_{\mathrm{corr}}$ & \SI{100}{m} & Path-corridor radius \\
+$c_E$ & $0.6$ & Energy weight in trajectory objective \\
+$c_f$ & $0.4$ & Final-time weight in trajectory objective \\
+$c_\nu$ & $0.1$ & Virtual-control penalty weight \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 
 \end{document}
