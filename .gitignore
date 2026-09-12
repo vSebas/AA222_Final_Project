@@ -1,2 +1,5 @@
 **/__pycache__/
 refs/
+# topic-table flyer build artifacts
+topic-table-flyer/node_modules/
+topic-table-flyer/flyer.pptx
