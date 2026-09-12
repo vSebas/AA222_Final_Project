@@ -51,6 +51,16 @@ Google Slides 版(可直接在线编辑)已上传至 Drive,见对话中的链接
 字体只用两种:标题 思源宋体 / `Noto Serif SC`,正文 思源黑体 / `Noto Sans SC`。
 视觉母题只有一个:俯视的六人圆桌(金色细圆环 + 六个座位点 + 圆心短文字),全页出现三次。
 
+## QA
+
+```bash
+npm install playwright            # 浏览器用系统已装的 Chromium,可用 CHROME_PATH 指定
+node qa-measure.js                # 量版式 + 导出 PDF + 查响应式
+python3 /mnt/skills/public/pptx/scripts/office/validate.py flyer-min.pptx
+```
+
+`qa-measure.js` 会打印内容总高与 A4 页高的差值,`overflow: 0px` 才算过。
+
 ## 重新生成 pptx
 
 ```bash
