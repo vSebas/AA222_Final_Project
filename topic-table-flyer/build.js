@@ -15,6 +15,7 @@ const C = {
   moss: "4A5F4E",   // 苔绿
   onDeep: "D6D9D1", // 深底上的次级正文
 };
+const PLACEHOLDER = require("path").join(__dirname, "placeholder.png");
 const SERIF = "Noto Serif SC";
 const SANS = "Noto Sans SC";
 
@@ -118,16 +119,17 @@ T([{ text: "第一步,只是坐下来聊一小时:", options: { breakLine: true 
 /* ================= 右栏:发起人 + 微信二维码 ================= */
 T("关于发起人", { x: RX, y: 2.80, w: RW, h: 0.30, fontFace: SERIF, fontSize: 14, bold: true, color: C.deep });
 
-// 圆形头像卡。拿到照片后把 ［头像］ 文本框换成 addImage({ rounding: true }) 即可。
+// 圆形头像卡。头像是真正的图片占位符 —— 在 Slides 里右键「替换图片」直接换成照片,
+// 圆形裁切和金色描边环都会保留。
 [["［姓名］", "哈佛大学", "产品与工程", 3.22],
  ["［姓名］", "斯坦福大学", "品牌与内容", 4.68]].forEach(([name, school, bio, y]) => {
   box(RX, y, RW, 1.30, C.card);
   const cx = RX + 0.17 + 0.44, cy = y + 0.65;
+  s.addImage({ path: PLACEHOLDER, x: cx - 0.44, y: cy - 0.44, w: 0.88, h: 0.88, rounding: true });
   s.addShape(pres.ShapeType.ellipse, {
     x: cx - 0.44, y: cy - 0.44, w: 0.88, h: 0.88,
-    fill: { color: C.paper }, line: { color: C.gold, width: 0.75 },
+    fill: { type: "none" }, line: { color: C.gold, width: 0.75 },
   });
-  T("［头像］", { x: cx - 0.40, y: cy - 0.07, w: 0.80, h: 0.16, fontSize: 6.5, color: C.moss, align: "center" });
   T(name, { x: RX + 1.14, y: y + 0.32, w: 1.02, h: 0.24, fontFace: SERIF, fontSize: 12, bold: true, color: C.deep });
   T(school, { x: RX + 1.14, y: y + 0.60, w: 1.02, h: 0.16, fontSize: 7.4, color: C.gold, charSpacing: 1.6 });
   T(bio, { x: RX + 1.14, y: y + 0.80, w: 1.02, h: 0.20, fontSize: 8.8, color: C.moss });
@@ -140,12 +142,11 @@ T("开店的事我们没做过,也不打算假装做过。我们能带来的是�
 // 联系卡:小标签 → 二维码 → 微信/邮箱
 box(RX, 9.05, RW, 1.90, C.card);
 T("见面", { x: RX + 0.19, y: 9.19, w: 1.2, h: 0.16, fontSize: 7.5, color: C.gold, charSpacing: 2 });
+// 二维码同样是图片占位符,右键「替换图片」即可
+s.addImage({ path: PLACEHOLDER, x: RX + (RW - 1.05) / 2, y: 9.42, w: 1.05, h: 1.05 });
 s.addShape(pres.ShapeType.rect, {
   x: RX + (RW - 1.05) / 2, y: 9.42, w: 1.05, h: 1.05,
-  fill: { color: C.paper }, line: { color: C.gold, width: 0.75 },
-});
-T([{ text: "［微信", options: { breakLine: true } }, { text: "二维码］" }], {
-  x: RX + (RW - 1.05) / 2, y: 9.83, w: 1.05, h: 0.34, fontSize: 6.5, color: C.moss, align: "center", lineSpacingMultiple: 1.2,
+  fill: { type: "none" }, line: { color: C.gold, width: 0.75 },
 });
 [["微信", "［填入微信号］", 10.55], ["邮箱", "［填入邮箱］", 10.74]].forEach(([k, v, y]) => {
   T(k, { x: RX + 0.19, y, w: 0.42, h: 0.18, fontSize: 8.8, color: C.deep });
@@ -161,8 +162,8 @@ T("上海 · 可线下面谈", { x: 5.0, y: 11.32, w: 2.67, h: 0.17, fontSize: 7
 /* ---------------- 演讲备注 ---------------- */
 s.addNotes(
   "A4 竖版单页招募单(左右两栏版)。需要发起人自行替换的内容:\n" +
-  "1) 右栏两张头像卡的［头像］与［姓名］—— 换成圆形照片和真名;\n" +
-  "2) 联系卡的［微信二维码］［填入微信号］［填入邮箱］;\n" +
+  "1) 右栏两张头像卡:在灰色圆形上右键 →「替换图片」换成照片(圆形裁切与金环会保留),再改［姓名］;\n" +
+  "2) 联系卡的灰色方块同样右键「替换图片」换成微信二维码,再填［填入微信号］［填入邮箱］;\n" +
   "3) 品牌名(目前全页未出现,可加在页首小字或页尾)。\n" +
   "配色:深墨绿 1E3227 / 纸色 F4F2EC / 卡片 E9E7DE / 金 C79A3E。字体只用思源宋体与思源黑体。"
 );
